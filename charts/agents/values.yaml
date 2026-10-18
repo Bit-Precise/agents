@@ -72,6 +72,41 @@ oidc:
   # Fresh login grants admin; removal revokes email-derived admin on Control restart.
   adminEmails: []
 
+# Ory Hydra is this instance's own OAuth authorization server for `agentd
+# login` (RFC 8628 Device Flow). It is separate from the upstream oidc IdP and
+# requires oidc.enabled: a device is registered by a person signed in with SSO.
+hydra:
+  enabled: false
+  image:
+    repository: docker.io/oryd/hydra
+    # The Device Flow integration is tested against this release; the digest
+    # pins its multi-architecture manifest list. Change both together.
+    tag: v26.2.0
+    digest: "sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9"
+  # Issuer origin reached by agentd and browsers, e.g. https://auth.agents.example.com
+  # or the serverURL origin itself. Only discovery, device authorization,
+  # verification and token paths are routed; the Admin API never is.
+  publicURL: ""
+  database:
+    # postgres: a database and account separate from agents' own.
+    # memory: evaluation only; restarts lose pending registrations.
+    type: postgres
+  # Defaults to the root existingSecret. Keys hold Hydra's DSN and its
+  # comma-separated system secrets (the first signs, the rest still verify).
+  existingSecret: ""
+  secretKeys:
+    dsn: hydra-dsn
+    systemSecrets: hydra-system-secrets
+  # Public client used by agentd and the only accepted token audience.
+  # Empty audience means urn:agents:<serverURL host>:agent-enrollment.
+  clientId: agentd
+  audience: ""
+  replicaCount: 1
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: "1", memory: 256Mi}
+  podAnnotations: {}
+
 serviceAccount:
   create: true
   name: ""
@@ -150,7 +185,14 @@ networkPolicy:
         - ipBlock: {cidr: 0.0.0.0/0}
         - ipBlock: {cidr: "::/0"}
       ports: [{protocol: TCP, port: 443}]
+  # Hydra and its migration Job reach their own PostgreSQL.
+  hydraPostgresEgress:
+    - to:
+        - ipBlock: {cidr: 0.0.0.0/0}
+        - ipBlock: {cidr: "::/0"}
+      ports: [{protocol: TCP, port: 5432}]
   extraEgress:
     control: []
     edge: []
     console: []
+    hydra: []

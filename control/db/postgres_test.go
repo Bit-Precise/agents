@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agents/control/types"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -16,7 +17,10 @@ import (
 
 // The test creates a dedicated schema rather than deleting records from a
 // caller's database. CI grants its disposable PostgreSQL user CREATE privilege.
-func TestPostgresPersistenceAndConstraints(t *testing.T) {
+// postgresSchema returns Options for a fresh, dedicated schema and a direct
+// connection to it for seeding and inspection.
+func postgresSchema(t *testing.T) (Options, *sql.DB) {
+	t.Helper()
 	dsn := os.Getenv("AGENTS_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("set AGENTS_TEST_POSTGRES_DSN to run real PostgreSQL persistence tests")
@@ -50,14 +54,24 @@ func TestPostgresPersistenceAndConstraints(t *testing.T) {
 	}
 	config.RuntimeParams["search_path"] = schemaName
 	registered := stdlib.RegisterConnConfig(config)
-	defer stdlib.UnregisterConnConfig(registered)
-	options := Options{Driver: "postgres", DSN: registered}
+	t.Cleanup(func() { stdlib.UnregisterConnConfig(registered) })
+	scoped, err := sql.Open("pgx", registered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = scoped.Close() })
+	return Options{Driver: "postgres", DSN: registered}, scoped
+}
+
+func TestPostgresPersistenceAndConstraints(t *testing.T) {
+	options, _ := postgresSchema(t)
 	store, err := Open(t.Context(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	baseline := types.Snapshot{Revision: 1, Users: []types.User{{ID: "user", Name: "alice"}}, Workspaces: []types.Workspace{{ID: "w1", Name: "one"}, {ID: "w2", Name: "two"}}, Memberships: []types.Membership{{WorkspaceID: "w1", UserID: "user", Role: "owner"}}, Agents: []types.Agent{{ID: "agent", WorkspaceID: "w1", UserID: "user", Name: "provider"}}, Services: []types.Service{{ID: "service", WorkspaceID: "w1", AgentID: "agent", Name: "demo", Hostname: "demo.one.example"}}, Tokens: []types.Token{{ID: "token", Hash: strings.Repeat("a", 64), Kind: "provider", UserID: "user", WorkspaceID: "w1", AgentID: "agent", ExpiresAt: time.Now().Add(time.Hour)}}}
+	baseline := types.Snapshot{Revision: 1, Users: []types.User{{ID: "user", Name: "alice"}}, Workspaces: []types.Workspace{{ID: "w1", Name: "one"}, {ID: "w2", Name: "two"}}, Memberships: []types.Membership{{WorkspaceID: "w1", UserID: "user", Role: "owner"}}, Agents: []types.Agent{{ID: "agent", WorkspaceID: "w1", Principal: api.Principal{Type: api.PrincipalUser, ID: "user"}, Name: "provider"}}, Services: []types.Service{{ID: "service", WorkspaceID: "w1", AgentID: "agent", Name: "demo", Hostname: "demo.one.example"}}, Tokens: []types.Token{{ID: "token", Hash: strings.Repeat("a", 64), Kind: "provider", UserID: "user", WorkspaceID: "w1", AgentID: "agent", ExpiresAt: time.Now().Add(time.Hour)}}}
 	if err = store.Save(t.Context(), types.Snapshot{}, baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -98,5 +112,79 @@ func TestPostgresPersistenceAndConstraints(t *testing.T) {
 				t.Fatal("failed PostgreSQL transaction partially replaced state")
 			}
 		})
+	}
+}
+
+// TestPostgresPrincipalMigrationOfExistingData migrates populated version-2
+// tables, so the ALTERs, the replaced grant subject constraints and the
+// payload rewrite run against real rows.
+func TestPostgresPrincipalMigrationOfExistingData(t *testing.T) {
+	options, scoped := postgresSchema(t)
+	statements := append(append([]string(nil), schema...),
+		`CREATE TABLE oidc_identities (issuer TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), payload TEXT NOT NULL, PRIMARY KEY(issuer,subject))`,
+		"UPDATE control_meta SET schema_version=2, revision=9 WHERE id=1",
+		`INSERT INTO users(id,name,payload) VALUES('dev','dev','{"id":"dev","name":"dev"}'),('other','other','{"id":"other","name":"other"}')`,
+		`INSERT INTO workspaces(id,name,payload) VALUES('w','work','{"id":"w","name":"work"}')`,
+		`INSERT INTO memberships(workspace_id,user_id,role,payload) VALUES('w','dev','developer','{"workspaceId":"w","userId":"dev","role":"developer"}')`,
+		`INSERT INTO agents(id,workspace_id,user_id,name,payload) VALUES('a','w','dev','laptop','{"id":"a","workspaceId":"w","workspace":"work","userId":"dev","name":"laptop","status":"active","roles":["serve"],"desired":{"apiVersion":"agents/v1alpha1","agent":{"name":"laptop"},"serve":{"enabled":true,"services":[{"name":"demo","origin":"http://127.0.0.1:8080"}]}}}')`,
+		`INSERT INTO services(id,workspace_id,agent_id,name,hostname,payload) VALUES('s','w','a','demo','demo.work.example','{"id":"s","workspaceId":"w","agentId":"a","name":"demo","hostname":"demo.work.example","enabled":true}')`,
+		`INSERT INTO enrollment_keys(id,workspace_id,user_id,payload) VALUES('k','w','dev','{"id":"k","workspaceId":"w","userId":"dev","roles":["serve"],"maxUses":1}')`,
+		`INSERT INTO tokens(id,hash,kind,user_id,workspace_id,agent_id,payload) VALUES('t','`+strings.Repeat("b", 64)+`','provider','dev','w','a','{"id":"t","kind":"provider","userId":"dev","workspaceId":"w","agentId":"a"}')`,
+		`INSERT INTO grants(id,workspace_id,resource_type,service_id,subject_type,subject_user_id,payload) VALUES('g','w','service','s','user','dev','{"id":"g","workspaceId":"w","resourceType":"service","resourceId":"s","subjectType":"user","subjectId":"dev"}')`,
+	)
+	for _, statement := range statements {
+		if _, err := scoped.ExecContext(t.Context(), statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	store, err := Open(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	snap, err := store.Load(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := api.Principal{Type: api.PrincipalUser, ID: "dev"}
+	if snap.Revision != 9 || len(snap.Agents) != 1 || snap.Agents[0].Principal != user || len(snap.EnrollmentKeys) != 1 || snap.EnrollmentKeys[0].UserID != "dev" ||
+		len(snap.Tokens) != 1 || snap.Tokens[0].UserID != "dev" || len(snap.Grants) != 1 {
+		t.Fatalf("legacy rows did not migrate to user principals: %+v", snap)
+	}
+	var version int
+	if err = scoped.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 4 {
+		t.Fatalf("schema version %d: %v", version, err)
+	}
+	// The new principal and grant subject are usable on the migrated tables.
+	sa := api.Principal{Type: api.PrincipalServiceAccount, ID: "sa"}
+	next := snap
+	next.Revision = 10
+	next.ServiceAccounts = []types.ServiceAccount{{ID: "sa", WorkspaceID: "w", Name: "fleet", Status: api.StatusActive, CreatedBy: "dev"}}
+	next.Agents = append(append([]types.Agent(nil), snap.Agents...), types.Agent{ID: "runner", WorkspaceID: "w", Principal: sa, CreatedBy: "dev", Name: "runner", Status: api.StatusActive})
+	next.EgressRoutes = []types.EgressRoute{{ID: "r", WorkspaceID: "w", AgentID: "runner", Name: "out", Enabled: true}}
+	next.Grants = append(append([]types.Grant(nil), snap.Grants...), types.Grant{ID: "sa-grant", WorkspaceID: "w", ResourceType: "egress", ResourceID: "r", SubjectType: "service_account", SubjectID: "sa", StartsAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)})
+	if err = store.Save(t.Context(), snap, next); err != nil {
+		t.Fatal(err)
+	}
+	// With the Service Account present, only the CHECK constraints can refuse these.
+	for _, statement := range []string{
+		"INSERT INTO agents(id,workspace_id,name,payload) VALUES('none','w','none','{}')",
+		"INSERT INTO agents(id,workspace_id,user_id,service_account_id,name,payload) VALUES('both','w','dev','sa','both','{}')",
+		"INSERT INTO enrollment_keys(id,workspace_id,user_id,service_account_id,payload) VALUES('k2','w','dev','sa','{}')",
+		"INSERT INTO grants(id,workspace_id,resource_type,route_id,subject_type,subject_user_id,subject_service_account_id,payload) VALUES('mixed','w','egress','r','service_account','dev','sa','{}')",
+	} {
+		if _, err := scoped.Exec(statement); err == nil {
+			t.Fatalf("migrated constraints accepted %s", statement)
+		}
+	}
+	if _, err := scoped.Exec("INSERT INTO grants(id,workspace_id,resource_type,route_id,subject_type,subject_service_account_id,payload) VALUES('valid','w','egress','r','service_account','sa','{}')"); err != nil {
+		t.Fatalf("a service account grant row was refused: %v", err)
+	}
+	cross := next
+	cross.Revision = 11
+	cross.Workspaces = append(append([]types.Workspace(nil), next.Workspaces...), types.Workspace{ID: "w2", Name: "two"})
+	cross.Agents = append(append([]types.Agent(nil), next.Agents...), types.Agent{ID: "elsewhere", WorkspaceID: "w2", Principal: sa, Name: "elsewhere", Status: api.StatusActive})
+	if err = store.Save(t.Context(), next, cross); err == nil {
+		t.Fatal("PostgreSQL accepted a service account device in another workspace")
 	}
 }

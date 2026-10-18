@@ -14,6 +14,7 @@
 | `internal.token` | 组件间元数据 API 认证 | Control、Edge |
 | `database-dsn` | PostgreSQL 连接字符串，仅 PostgreSQL 模式需要 | Control |
 | 自选 OIDC 键 | 可选 confidential-client secret | Control |
+| `hydra-dsn`、`hydra-system-secrets` | Hydra 的 PostgreSQL DSN 与系统密钥，仅 `hydra.enabled` 时需要，可放在独立 Secret | Hydra 与其迁移 Job |
 
 ```sh
 kubectl create namespace agents
@@ -84,6 +85,7 @@ ingress:
 | `probes.*` | HTTP `/healthz` 的 startup/readiness/liveness；可以调整 |
 | `networkPolicy.enabled` | 默认 `false`；启用前匹配实际 Controller/DNS/数据库/IdP |
 | `oidc.*` | 默认关闭；见下文 |
+| `hydra.*` | 默认关闭；为 `agentd login` 部署 Ory Hydra，需要 `oidc.enabled`，见 [docs/helm.md](../../docs/helm.md) |
 
 `/healthz` 表示进程存活，不证明数据库、Control、provider 或外部 IdP 都可达。业务不可用时应同时检查应用日志和控制台状态。
 

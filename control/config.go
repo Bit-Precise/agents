@@ -41,6 +41,9 @@ type Config struct {
 	EdgeInternalURL   string     `yaml:"edgeInternalURL"`
 	ConsoleURL        string     `yaml:"consoleURL"`
 	OIDC              OIDCConfig `yaml:"oidc"`
+	// Hydra is this instance's own OAuth authorization server for `agentd
+	// login`; it is unrelated to the upstream oidc identity provider.
+	Hydra HydraConfig `yaml:"hydra"`
 	// ServiceGrantTTL is the window of the Workspace-member grant created when a
 	// service is first published (default 168h, at most 720h).
 	ServiceGrantTTL time.Duration `yaml:"serviceGrantTTL"`
@@ -55,6 +58,33 @@ type OIDCConfig struct {
 	Scopes                 []string `yaml:"scopes"`
 	BootstrapAdminSubjects []string `yaml:"bootstrapAdminSubjects"`
 	AdminEmails            []string `yaml:"adminEmails"`
+}
+
+// HydraConfig connects Control to Ory Hydra. PublicURL is the issuer that
+// agentd and browsers reach; AdminURL is private to Control.
+type HydraConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	PublicURL      string `yaml:"publicURL"`
+	AdminURL       string `yaml:"adminURL"`
+	AdminTokenFile string `yaml:"adminTokenFile"`
+	ClientID       string `yaml:"clientId"`
+	Audience       string `yaml:"audience"`
+}
+
+// DeviceClientID is the public Hydra client used by agentd, "agentd" by default.
+func (c Config) DeviceClientID() string {
+	if c.Hydra.ClientID == "" {
+		return "agentd"
+	}
+	return c.Hydra.ClientID
+}
+
+// DeviceAudience is the only audience a registration access token may carry.
+func (c Config) DeviceAudience() string {
+	if c.Hydra.Audience == "" {
+		return "urn:agents:" + c.BaseDomain() + ":agent-enrollment"
+	}
+	return c.Hydra.Audience
 }
 
 func LoadConfig(path string) (Config, error) { return LoadConfigFor(path, "serve") }
@@ -128,6 +158,9 @@ func LoadConfigFor(path, mode string) (Config, error) {
 	if cfg.OIDC.ClientSecretFile != "" {
 		cfg.OIDC.ClientSecretFile = resolvePath(base, cfg.OIDC.ClientSecretFile)
 	}
+	if cfg.Hydra.AdminTokenFile != "" {
+		cfg.Hydra.AdminTokenFile = resolvePath(base, cfg.Hydra.AdminTokenFile)
+	}
 	return cfg, cfg.ValidateFor(mode)
 }
 
@@ -192,6 +225,9 @@ func (c Config) ValidateFor(mode string) error {
 	if mode == "edge" || mode == "console" {
 		return nil
 	}
+	if err := c.validateHydra(); err != nil {
+		return err
+	}
 	if c.Database.Type != "sqlite" && c.Database.Type != "postgres" {
 		return errors.New("database.type must be sqlite or postgres")
 	}
@@ -238,6 +274,31 @@ func (c Config) validateOIDC() error {
 	for _, email := range c.OIDC.AdminEmails {
 		if _, ok := normalizedOIDCEmail(email); !ok {
 			return errors.New("oidc.adminEmails must contain complete email addresses without display names")
+		}
+	}
+	return nil
+}
+
+func (c Config) validateHydra() error {
+	if !c.Hydra.Enabled {
+		return nil
+	}
+	// A device registration needs a person verified by the upstream IdP; an
+	// emergency token login is accepted only for loopback development.
+	if !c.OIDC.Enabled && !c.DevelopmentHTTP {
+		return errors.New("hydra requires oidc, unless developmentHTTP is set")
+	}
+	u, err := url.Parse(c.Hydra.PublicURL)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || len(c.Hydra.PublicURL) > 2048 || (u.Scheme != "https" && !(c.DevelopmentHTTP && u.Scheme == "http" && localHost(u.Hostname()))) {
+		return errors.New("hydra.publicURL must be an HTTPS issuer URL (loopback HTTP requires developmentHTTP)")
+	}
+	a, err := url.Parse(c.Hydra.AdminURL)
+	if err != nil || a.Host == "" || a.User != nil || a.RawQuery != "" || a.ForceQuery || a.Fragment != "" || (a.Scheme != "http" && a.Scheme != "https") {
+		return errors.New("hydra.adminURL must be an HTTP(S) URL")
+	}
+	for _, value := range []string{c.DeviceClientID(), c.DeviceAudience()} {
+		if len(value) > 256 || strings.IndexFunc(value, func(r rune) bool { return r <= ' ' || r == 0x7f }) >= 0 {
+			return errors.New("hydra.clientId and hydra.audience must be printable without spaces")
 		}
 	}
 	return nil

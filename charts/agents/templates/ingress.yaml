@@ -3,6 +3,12 @@
 {{- $name := include "agents.fullname" . }}
 {{- $controlHost := (urlParse .Values.public.serverURL).hostname }}
 {{- $edgeHost := (urlParse .Values.public.edgeURL).hostname }}
+{{- $hydraHost := "" }}
+{{- if .Values.hydra.enabled }}
+{{- $hydraHost = (urlParse .Values.hydra.publicURL).hostname }}
+{{- end }}
+{{- /* Only the issuer paths agentd and browsers use; never Hydra's Admin API. */}}
+{{- $hydraPaths := list "/.well-known/openid-configuration" "/oauth2/device/auth" "/oauth2/device/verify" "/oauth2/token" }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -26,6 +32,16 @@ spec:
     - host: {{ $controlHost | quote }}
       http:
         paths:
+          {{- if eq $controlHost $hydraHost }}
+          {{- range $hydraPaths }}
+          - path: {{ . }}
+            pathType: Exact
+            backend:
+              service:
+                name: {{ $name }}-hydra-public
+                port: {name: public}
+          {{- end }}
+          {{- end }}
           {{- if eq $controlHost $edgeHost }}
           - path: /agent
             pathType: Prefix
@@ -40,6 +56,19 @@ spec:
               service:
                 name: {{ $name }}-control
                 port: {name: http}
+    {{- if and $hydraHost (ne $hydraHost $controlHost) }}
+    - host: {{ $hydraHost | quote }}
+      http:
+        paths:
+          {{- range $hydraPaths }}
+          - path: {{ . }}
+            pathType: Exact
+            backend:
+              service:
+                name: {{ $name }}-hydra-public
+                port: {name: public}
+          {{- end }}
+    {{- end }}
     {{- if ne $controlHost $edgeHost }}
     - host: {{ $edgeHost | quote }}
       http:

@@ -68,10 +68,10 @@ func (b *memoryBackend) ResolveServe(host, user string) (types.Decision, error) 
 	}
 	return v, nil
 }
-func (b *memoryBackend) ResolveEgress(workspace, user, host string, port int) (types.Decision, error) {
+func (b *memoryBackend) ResolveEgress(workspace string, consumer api.Principal, host string, port int) (types.Decision, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	v, ok := b.egress[fmt.Sprintf("%s/%s/%s/%d", workspace, user, host, port)]
+	v, ok := b.egress[fmt.Sprintf("%s/%s/%s/%d", workspace, consumer.Subject(), host, port)]
 	if !ok {
 		return v, ErrDenied
 	}
@@ -92,8 +92,9 @@ func fixtureBackend() *memoryBackend {
 	until := time.Now().Add(time.Minute)
 	b := &memoryBackend{tokens: map[string]types.Identity{}, agents: map[string]api.Agent{}, serve: map[string]types.Decision{}, egress: map[string]types.Decision{}, events: make(chan struct{}, 1)}
 	rule := policy.Rule{Domain: policy.Domain{Suffix: "example.com"}, Ports: []int{443}, Protocol: "tls"}
+	alice := api.Principal{Type: api.PrincipalUser, ID: "alice"}
 	for _, id := range []string{"campus", "office", "client", "bob"} {
-		b.agents[id] = api.Agent{ID: id, WorkspaceID: "w1", Workspace: "workspace1", UserID: "alice", Status: api.StatusActive,
+		b.agents[id] = api.Agent{ID: id, WorkspaceID: "w1", Workspace: "workspace1", Principal: alice, Status: api.StatusActive,
 			Desired:   api.AgentSpec{Serve: api.ServeSpec{Enabled: true, Services: []api.ServiceSpec{{Name: "demo", Origin: "http://127.0.0.1:8080"}, {Name: "api", Origin: "http://127.0.0.1:8081"}}}, Egress: api.EgressSpec{Enabled: true, Allow: []policy.Rule{rule}}},
 			Effective: api.EffectiveConfig{Revision: 1, ExpiresAt: until, Services: []api.EffectiveService{{Name: "demo", Origin: "http://127.0.0.1:8080", Hostname: "demo.workspace1.instance.example"}, {Name: "api", Origin: "http://127.0.0.1:8081", Hostname: "api.workspace1.instance.example"}}, Egress: []policy.Rule{rule}}}
 		kind, user := "provider", "alice"
@@ -103,14 +104,14 @@ func fixtureBackend() *memoryBackend {
 		if id == "bob" {
 			user = "bob"
 		}
-		b.tokens[id+"-token"] = types.Identity{TokenID: id + "-token-id", Kind: kind, UserID: user, AgentID: id, WorkspaceID: "w1", Workspace: "workspace1", ExpiresAt: until}
+		b.tokens[id+"-token"] = types.Identity{TokenID: id + "-token-id", Kind: kind, UserID: user, Principal: api.Principal{Type: api.PrincipalUser, ID: user}, AgentID: id, WorkspaceID: "w1", Workspace: "workspace1", ExpiresAt: until}
 	}
 	for _, route := range []struct{ host, agent string }{{"campus.example.com", "campus"}, {"office.example.com", "office"}} {
-		b.egress["workspace1/alice/"+route.host+"/443"] = types.Decision{ResourceType: "egress", ResourceID: route.agent + "-route", WorkspaceID: "w1", Workspace: "workspace1", AgentID: route.agent, UserID: "alice", Destination: connection.Destination{Host: route.host, Port: 443}, Revision: 1, ExpiresAt: until}
+		b.egress["workspace1/user:alice/"+route.host+"/443"] = types.Decision{ResourceType: "egress", ResourceID: route.agent + "-route", WorkspaceID: "w1", Workspace: "workspace1", AgentID: route.agent, Consumer: alice, Destination: connection.Destination{Host: route.host, Port: 443}, Revision: 1, ExpiresAt: until}
 	}
 	for _, name := range []string{"demo", "api"} {
 		host := name + ".workspace1.instance.example"
-		b.serve[host+"/alice"] = types.Decision{ResourceType: "service", ResourceID: name + "-service", WorkspaceID: "w1", Workspace: "workspace1", AgentID: "office", ServiceName: name, Hostname: host, UserID: "alice", Revision: 1, ExpiresAt: until}
+		b.serve[host+"/alice"] = types.Decision{ResourceType: "service", ResourceID: name + "-service", WorkspaceID: "w1", Workspace: "workspace1", AgentID: "office", ServiceName: name, Hostname: host, Consumer: alice, Revision: 1, ExpiresAt: until}
 	}
 	return b
 }
@@ -298,6 +299,61 @@ func TestExactAgentRoutingPreservesClientHello(t *testing.T) {
 		flow.Close()
 	}
 	await(t, func() bool { return len(h.e.Snapshot().Flows) == 0 })
+}
+
+func TestServiceAccountAccessUsesOnlyItsOwnEgressDecision(t *testing.T) {
+	h := newHarness(t)
+	h.provider(t, "office", "connector-office", nil, func(flow *connection.Stream) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(flow, int64(len(helloBytes("office.example.com")))))
+		_, _ = flow.Write([]byte("office"))
+		_ = flow.CloseWrite()
+		_, _ = io.Copy(io.Discard, flow)
+	})
+	robot := api.Principal{Type: api.PrincipalServiceAccount, ID: "robot"}
+	h.b.mu.Lock()
+	agent := h.b.agents["client"]
+	agent.ID, agent.Principal = "robot", robot
+	h.b.agents["robot"] = agent
+	h.b.tokens["robot-token"] = types.Identity{TokenID: "robot-token-id", Kind: "access", Principal: robot, AgentID: "robot", WorkspaceID: "w1", Workspace: "workspace1", ExpiresAt: time.Now().Add(time.Minute)}
+	// A service account carrying a user field is malformed and never admitted.
+	forged := h.b.tokens["robot-token"]
+	forged.TokenID, forged.UserID = "forged-token-id", "alice"
+	h.b.tokens["forged-token"] = forged
+	h.b.mu.Unlock()
+	if _, err := h.dial(t, "robot", "", "forged-token", "forged-token", nil); err == nil {
+		t.Fatal("service account identity with a user was admitted")
+	}
+	access, err := h.dial(t, "robot", "", "robot-token", "robot-token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := connection.OpenRequest{Purpose: connection.PurposeAccess, Destination: connection.Destination{Host: "office.example.com", Port: 443}, Protocol: "tls", Deadline: time.Now().Add(20 * time.Second)}
+	if flow, err := access.Open(t.Context(), request); err == nil {
+		flow.Close()
+		t.Fatal("service account used a user's egress decision")
+	}
+	h.b.mu.Lock()
+	d := h.b.egress["workspace1/user:alice/office.example.com/443"]
+	d.Consumer = robot
+	h.b.egress["workspace1/service_account:robot/office.example.com/443"] = d
+	h.b.mu.Unlock()
+	flow, err := access.Open(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer flow.Close()
+	flow.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err = flow.Write(helloBytes("office.example.com")); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]byte, len("office"))
+	if _, err = io.ReadFull(flow, got); err != nil || string(got) != "office" {
+		t.Fatalf("service account flow: %q %v", got, err)
+	}
+	flows := h.e.Snapshot().Flows
+	if len(flows) != 1 || flows[0].Consumer == nil || *flows[0].Consumer != robot {
+		t.Fatalf("flow consumer: %+v", flows)
+	}
 }
 
 func TestTransportHelloBindingAndScope(t *testing.T) {
@@ -916,9 +972,9 @@ func TestRollingAccessAndProviderLeasesRemainOnExactAgent(t *testing.T) {
 	}
 	// Changing the selected Agent must terminate this flow, never migrate it.
 	h.b.mu.Lock()
-	d := h.b.egress["workspace1/alice/office.example.com/443"]
+	d := h.b.egress["workspace1/user:alice/office.example.com/443"]
 	d.AgentID = "campus"
-	h.b.egress["workspace1/alice/office.example.com/443"] = d
+	h.b.egress["workspace1/user:alice/office.example.com/443"] = d
 	h.b.mu.Unlock()
 	h.b.changed()
 	select {

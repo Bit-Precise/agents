@@ -64,17 +64,60 @@ func enrollRequest(key, name string, spec api.AgentSpec) types.EnrollRequest {
 func update(spec api.AgentSpec) api.ConfigUpdate {
 	return api.ConfigUpdate{Workspace: "w1", Name: "provider", Desired: spec}
 }
+
+// enroll registers the fixture user's own device through Device Flow.
 func (f fixture) enroll(t *testing.T) types.EnrollResponse {
 	t.Helper()
-	_, key, err := f.s.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: f.user.ID, Roles: []string{"ingress", "serve", "egress"}, MaxUses: 1, ExpiresAt: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, err := f.s.Enroll(enrollRequest(key, "provider", desired()))
+	out, err := f.deviceEnroll(f.user.ID, userPrincipal(f.user.ID), "provider", desired())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// deviceEnroll runs the Control side of Device Flow: the actor confirms the
+// principal in the browser, then the device exchanges the access token.
+func (f fixture) deviceEnroll(actorID string, p api.Principal, name string, spec api.AgentSpec) (types.EnrollResponse, error) {
+	a, err := f.s.BeginDeviceAuthorization(actorID, "agentd", "challenge-"+randomID())
+	if err != nil {
+		return types.EnrollResponse{}, err
+	}
+	if _, err = f.s.AuthorizeDevice(actorID, a.ID, f.workspace.ID, p); err != nil {
+		return types.EnrollResponse{}, err
+	}
+	return f.s.ExchangeDeviceEnrollment(a.ID, p, api.AgentEnrollment{Workspace: f.workspace.Name, Name: name, Desired: spec})
+}
+
+// legacyUserKey stores a User-bound key as created before Service Accounts;
+// such keys keep working until they expire or are revoked.
+func (f fixture) legacyUserKey(t *testing.T, userID string, roles []string, maxUses int) (types.EnrollmentKey, string) {
+	t.Helper()
+	plain := randomToken()
+	key := types.EnrollmentKey{ID: randomID(), WorkspaceID: f.workspace.ID, UserID: userID, Roles: roles, MaxUses: maxUses, ExpiresAt: time.Now().Add(time.Hour)}
+	if err := f.s.mutate(func(snap *types.Snapshot) error {
+		snap.EnrollmentKeys = append(snap.EnrollmentKeys, key)
+		token := tokenRecord("enrollment", plain, userPrincipal(userID), f.workspace.ID, "", key.ExpiresAt)
+		token.ID = key.ID
+		snap.Tokens = append(snap.Tokens, token)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return key, plain
+}
+
+// serviceAccountKey creates a Service Account and an unattended key for it.
+func (f fixture) serviceAccountKey(t *testing.T, name string, roles []string, maxUses int) (types.ServiceAccount, types.EnrollmentKey, string) {
+	t.Helper()
+	sa, err := f.s.CreateServiceAccount(f.admin.ID, f.workspace.ID, name, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, plain, err := f.s.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{ServiceAccountID: sa.ID, Roles: roles, MaxUses: maxUses, ExpiresAt: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sa, key, plain
 }
 func requireKind(t *testing.T, err error, want types.ErrorKind) {
 	t.Helper()
@@ -143,16 +186,13 @@ func TestEnrollmentIsEffectiveWithoutApproval(t *testing.T) {
 		t.Fatalf("default member grant missing for a published service: %v", err)
 	}
 	// Egress still needs an explicit route and grant; enrollment grants nothing.
-	_, err := f.s.ResolveEgress("w1", f.user.ID, "oa.test", 443)
+	_, err := f.s.ResolveEgress("w1", userPrincipal(f.user.ID), "oa.test", 443)
 	requireKind(t, err, types.KindForbidden)
 }
 
 func TestEnrollmentKeyConsumedExactlyOnceConcurrently(t *testing.T) {
 	f := setup(t)
-	key, plain, err := f.s.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: f.user.ID, Roles: []string{"ingress"}, MaxUses: 1, ExpiresAt: time.Now().Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, key, plain := f.serviceAccountKey(t, "ci", []string{"ingress"}, 1)
 	var success atomic.Int32
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -282,13 +322,13 @@ func TestEgressRequiresRouteGrantAndBothCapabilitySides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.s.ResolveEgress("w1", f.user.ID, "oa.test", 443)
+	_, err = f.s.ResolveEgress("w1", userPrincipal(f.user.ID), "oa.test", 443)
 	requireKind(t, err, types.KindForbidden)
 	grant, err := f.s.CreateGrant(f.admin.ID, types.Grant{WorkspaceID: f.workspace.ID, ResourceType: "egress", ResourceID: route.ID, SubjectType: "user", SubjectID: f.user.ID, ExpiresAt: time.Now().Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	decision, err := f.s.ResolveEgress("w1", f.user.ID, "OA.TEST.", 443)
+	decision, err := f.s.ResolveEgress("w1", userPrincipal(f.user.ID), "OA.TEST.", 443)
 	if err != nil || decision.AgentID != enrolled.Agent.ID || decision.Destination.Host != "oa.test" {
 		t.Fatalf("wrong routed destination: %+v %v", decision, err)
 	}
@@ -297,7 +337,7 @@ func TestEgressRequiresRouteGrantAndBothCapabilitySides(t *testing.T) {
 	if _, err = f.s.UpdateAgent(enrolled.Credentials.ControlToken, update(spec)); err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.s.ResolveEgress("w1", f.user.ID, "oa.test", 443)
+	_, err = f.s.ResolveEgress("w1", userPrincipal(f.user.ID), "oa.test", 443)
 	requireKind(t, err, types.KindForbidden)
 	if _, err = f.s.ResolveServe("demo.w1.instance.test", f.user.ID); err != nil {
 		t.Fatal("egress withdrawal interrupted serve")
@@ -326,8 +366,10 @@ func TestTenantScopeAndGuestRoleCannotBeBypassed(t *testing.T) {
 	if _, err = f.s.SetMembership(f.admin.ID, w2.ID, guest.ID, "guest"); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = f.s.CreateEnrollmentKey(guest.ID, types.EnrollmentKey{WorkspaceID: w2.ID, Roles: []string{"serve"}})
+	_, err = f.s.CreateServiceAccount(guest.ID, w2.ID, "robot", "")
 	requireKind(t, err, types.KindForbidden)
+	_, _, err = f.s.CreateEnrollmentKey(f.user.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: f.user.ID, Roles: []string{"serve"}})
+	requireKind(t, err, types.KindInvalid)
 	moved := update(desired())
 	moved.Workspace = "w2"
 	_, err = f.s.UpdateAgent(enrolled.Credentials.ControlToken, moved)
@@ -339,10 +381,7 @@ func TestTenantScopeAndGuestRoleCannotBeBypassed(t *testing.T) {
 func TestRevokeAndMembershipRemovalCascadeAndDoNotResurrect(t *testing.T) {
 	f := setup(t)
 	enrolled := f.enroll(t)
-	unused, _, err := f.s.CreateEnrollmentKey(f.user.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, Roles: []string{"ingress"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	unused, _ := f.legacyUserKey(t, f.user.ID, []string{"ingress"}, 1)
 	updates, cancel := f.s.Subscribe()
 	defer cancel()
 	if err := f.s.RemoveMembership(f.admin.ID, f.workspace.ID, f.user.ID); err != nil {
@@ -353,7 +392,7 @@ func TestRevokeAndMembershipRemovalCascadeAndDoNotResurrect(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("committed revocation was not published")
 	}
-	_, err = f.s.Identity(enrolled.Credentials.ProviderToken)
+	_, err := f.s.Identity(enrolled.Credentials.ProviderToken)
 	requireKind(t, err, types.KindUnauthorized)
 	if _, err = f.s.SetMembership(f.admin.ID, f.workspace.ID, f.user.ID, "developer"); err != nil {
 		t.Fatal(err)
@@ -448,10 +487,7 @@ func TestExpansionAppliesAutomaticallyWithoutRecreatingGrants(t *testing.T) {
 
 func TestRejectedUpdateKeepsEffectiveConfigAndRecordsReason(t *testing.T) {
 	f := setup(t)
-	_, key, err := f.s.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: f.user.ID, Roles: []string{"ingress", "serve"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, key := f.legacyUserKey(t, f.user.ID, []string{"ingress", "serve"}, 1)
 	spec := desired()
 	spec.Egress.Enabled = false
 	enrolled, err := f.s.Enroll(enrollRequest(key, "provider", spec))
@@ -490,13 +526,9 @@ func TestRejectedUpdateKeepsEffectiveConfigAndRecordsReason(t *testing.T) {
 
 func (f fixture) enrollNamed(t *testing.T, name string) types.EnrollResponse {
 	t.Helper()
-	_, key, err := f.s.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: f.admin.ID, Roles: []string{"ingress"}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	spec := desired()
 	spec.Serve.Enabled, spec.Egress.Enabled = false, false
-	out, err := f.s.Enroll(enrollRequest(key, name, spec))
+	out, err := f.deviceEnroll(f.admin.ID, userPrincipal(f.admin.ID), name, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,10 +548,7 @@ func TestRevokedAgentNamesAreReclaimedWithoutReviving(t *testing.T) {
 	if _, err = f.s.SetMembership(f.admin.ID, f.workspace.ID, bob.ID, "developer"); err != nil {
 		t.Fatal(err)
 	}
-	_, bobKey, err := f.s.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: bob.ID, Roles: []string{"ingress", "serve", "egress"}, MaxUses: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, bobKey := f.legacyUserKey(t, bob.ID, []string{"ingress", "serve", "egress"}, 2)
 	_, err = f.s.Enroll(enrollRequest(bobKey, "provider", desired()))
 	requireKind(t, err, types.KindConflict)
 	// The same principal re-registers immediately; the revoked record, its
@@ -561,31 +590,28 @@ func TestEgressPriorityDoesNotFallbackAndProviderDenyWins(t *testing.T) {
 	if _, err = f.s.CreateGrant(f.admin.ID, types.Grant{WorkspaceID: f.workspace.ID, ResourceType: "egress", ResourceID: broad.ID, SubjectType: "workspace", SubjectID: f.workspace.ID, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.s.ResolveEgress("w1", f.user.ID, "oa.test", 443)
+	_, err = f.s.ResolveEgress("w1", userPrincipal(f.user.ID), "oa.test", 443)
 	requireKind(t, err, types.KindForbidden)
 	if _, err = f.s.SetEgressRouteEnabled(f.admin.ID, exact.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	decision, err := f.s.ResolveEgress("w1", f.user.ID, "oa.test", 443)
+	decision, err := f.s.ResolveEgress("w1", userPrincipal(f.user.ID), "oa.test", 443)
 	if err != nil || decision.ResourceID != broad.ID {
 		t.Fatalf("broad route not selected after exact disabled: %+v %v", decision, err)
 	}
-	_, err = f.s.ResolveEgress("w1", f.user.ID, "blocked.test", 443)
+	_, err = f.s.ResolveEgress("w1", userPrincipal(f.user.ID), "blocked.test", 443)
 	requireKind(t, err, types.KindForbidden)
 }
 
 func TestRejectedEnrollmentRollsBackReservationsAndKeyUse(t *testing.T) {
 	f := setup(t)
 	f.enroll(t)
-	key, plain, err := f.s.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: f.user.ID, Roles: []string{"serve"}, MaxUses: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
+	key, plain := f.legacyUserKey(t, f.user.ID, []string{"serve"}, 1)
 	spec := desired()
 	spec.Ingress.Enabled = false
 	spec.Egress.Enabled = false
 	spec.Serve.Services = append([]api.ServiceSpec{{Name: "fresh", Origin: "http://127.0.0.1:3000"}}, spec.Serve.Services...)
-	_, err = f.s.Enroll(enrollRequest(plain, "second", spec))
+	_, err := f.s.Enroll(enrollRequest(plain, "second", spec))
 	requireKind(t, err, types.KindConflict)
 	snap, _ := f.s.SnapshotForUser(f.admin.ID)
 	for _, k := range snap.EnrollmentKeys {
@@ -706,10 +732,7 @@ func TestConcurrentUpdatesKeepEffectiveConsistentWithDesired(t *testing.T) {
 
 func TestEnrollmentPreissuesOnlyPermittedRoleTokens(t *testing.T) {
 	f := setup(t)
-	_, key, err := f.s.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: f.user.ID, Roles: []string{"ingress", "serve"}, MaxUses: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, key := f.legacyUserKey(t, f.user.ID, []string{"ingress", "serve"}, 1)
 	spec := desired()
 	spec.Serve.Enabled = false
 	spec.Egress.Enabled = false

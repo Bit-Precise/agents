@@ -1194,3 +1194,129 @@ main {
     transition: none !important;
   }
 }
+.device-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+  background: #f4f7f8;
+}
+.device-card {
+  width: min(560px, 100%);
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 34px 36px;
+}
+.device-card h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  margin-bottom: 10px;
+}
+.device-card h2 {
+  font-size: 12px;
+  font-weight: 650;
+  color: #4f6676;
+  margin-bottom: 10px;
+}
+.device-lead,
+.device-loading,
+.device-ending p {
+  font-size: 12px;
+  color: #7d8f9c;
+  line-height: 1.8;
+}
+.device-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.device-ending {
+  margin-top: 22px;
+  padding: 18px;
+  border: 1px solid #e5ebf0;
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+.device-code {
+  margin: 22px 0;
+  padding: 16px 18px;
+  border: 1px solid #c9e2d9;
+  border-radius: 8px;
+  background: #f2faf6;
+  display: grid;
+  gap: 4px;
+}
+.device-code span,
+.device-code small {
+  font-size: 10px;
+  color: #6f8f83;
+}
+.device-code strong {
+  font-family: ui-monospace, monospace;
+  font-size: 22px;
+  letter-spacing: 3px;
+  color: #1f4b3f;
+}
+.device-step {
+  margin-bottom: 20px;
+}
+.device-options {
+  display: grid;
+  gap: 8px;
+}
+.device-option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid #e0e7ec;
+  border-radius: 8px;
+  background: white;
+  font-size: 12px;
+  cursor: pointer;
+}
+.device-option > strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+.device-option > span {
+  font-size: 11px;
+  color: #8a9aa6;
+}
+.device-option[aria-checked="true"] {
+  border-color: #2f7d66;
+  background: #f2faf6;
+}
+.device-option[aria-checked="true"]::after {
+  content: "✓";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #2f7d66;
+}
+.device-summary {
+  font-size: 12px;
+  line-height: 2;
+  color: #5c7282;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #f7f9fb;
+  margin-bottom: 18px;
+}
+.device-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

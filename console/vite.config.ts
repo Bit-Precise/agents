@@ -17,6 +17,8 @@ export default defineConfig({
     outDir: "../control/assets/web",
     emptyOutDir: true,
     assetsInlineLimit: 0,
+    // Control embeds exactly one app.js (codeSplitting below is off).
+    chunkSizeWarningLimit: 768,
     rollupOptions: {
       output: {
         entryFileNames: "assets/app.js",

@@ -61,9 +61,69 @@ spec:
     {{- toYaml $.Values.networkPolicy.oidcEgress | nindent 4 }}
     {{- end }}
     {{- end }}
+    {{- if and (eq $component "control") $.Values.hydra.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agents.selectorLabels" (dict "root" $ "component" "hydra") | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 4445}
+    {{- end }}
     {{- with (index $.Values.networkPolicy.extraEgress $component) }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
   {{- end }}
+{{- end }}
+{{- if .Values.hydra.enabled }}
+{{- range $component := list "hydra" "hydra-migrate" }}
+{{- if or (eq $component "hydra") (eq $.Values.hydra.database.type "postgres") }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agents.fullname" $ }}-{{ $component }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "agents.labels" (dict "root" $ "component" $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agents.selectorLabels" (dict "root" $ "component" $component) | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  {{- if eq $component "hydra" }}
+  # Browsers and agentd reach the public port through the ingress controller;
+  # the Admin API accepts Control only.
+  ingress:
+    {{- with $.Values.networkPolicy.ingressFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 4444}
+    {{- end }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "agents.selectorLabels" (dict "root" $ "component" "control") | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 4445}
+  {{- else }}
+  ingress: []
+  {{- end }}
+  egress:
+    - to:
+        {{- toYaml $.Values.networkPolicy.dnsPeers | nindent 8 }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    {{- if eq $.Values.hydra.database.type "postgres" }}
+    {{- with $.Values.networkPolicy.hydraPostgresEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- end }}
+    {{- with $.Values.networkPolicy.extraEgress.hydra }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}

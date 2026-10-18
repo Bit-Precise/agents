@@ -10,6 +10,7 @@ import type {
   RouteView,
   EnrollmentKey,
   Membership,
+  ServiceAccount,
   Workspace,
   FlowStatus,
 } from "@/api/generated";
@@ -79,7 +80,9 @@ import {
   canManageResource,
   grantHealth,
   health,
+  isSelf,
   name,
+  principalName,
   resourceName,
   roleNames,
   serviceURL,
@@ -87,6 +90,7 @@ import {
   subjectName,
   time,
 } from "@/lib/model";
+import { DeviceAuthorizationPage } from "@/components/device-authorization";
 
 const pages = {
   overview: {
@@ -127,9 +131,11 @@ const pages = {
   },
 } as const;
 export type Page = keyof typeof pages;
-type AccessTab = "grants" | "keys" | "members" | "workspaces" | "users";
+type AccessTab =
+  "grants" | "serviceAccounts" | "keys" | "members" | "workspaces" | "users";
 const accessTabs: Record<AccessTab, string> = {
   grants: "访问授权",
+  serviceAccounts: "服务账号",
   keys: "注册密钥",
   members: "成员",
   workspaces: "工作空间",
@@ -165,10 +171,22 @@ const actionLabels: Record<string, string> = {
   "egress_route.create": "创建出口路由",
   "egress_route.enabled": "更新出口路由状态",
   "user.token.rotate": "更新用户令牌",
+  "service_account.create": "创建服务账号",
+  "service_account.update": "更新服务账号说明",
+  "service_account.revoke": "撤销服务账号",
+  "device_authorization.begin": "开始设备授权",
+  "device_authorization.authorize": "确认设备授权",
+  "device_authorization.revoke": "拒绝设备授权",
 };
 function currentPage(): Page {
   const value = location.hash.slice(1);
   return value in pages ? (value as Page) : "overview";
+}
+// #device/<id> is the `agentd login` confirmation, reached from Control.
+function currentDevice(): string {
+  return location.hash.startsWith("#device/")
+    ? decodeURIComponent(location.hash.slice("#device/".length))
+    : "";
 }
 function Brand() {
   return (
@@ -193,6 +211,7 @@ export default function App() {
     [error, setError] = useState(""),
     [toast, setToast] = useState("");
   const [page, setPage] = useState<Page>(currentPage),
+    [device, setDevice] = useState(currentDevice),
     [tab, setTab] = useState<AccessTab>("grants"),
     [agentTab, setAgentTab] = useState<"agents" | "ingresses" | "egresses">(
       "agents",
@@ -227,6 +246,7 @@ export default function App() {
               : (
                   {
                     grants: "grants",
+                    serviceAccounts: "serviceAccounts",
                     keys: "enrollmentKeys",
                     members: "memberships",
                     workspaces: "workspaces",
@@ -254,6 +274,7 @@ export default function App() {
     users: ["id", "name", "createdAt"],
     workspaces: ["id", "name", "createdAt"],
     agents: ["id", "name", "createdAt", "status"],
+    serviceAccounts: ["id", "name", "createdAt", "status"],
     ingresses: ["id", "name", "status"],
     egresses: ["id", "name", "status"],
     servers: ["id", "name", "hostname"],
@@ -265,17 +286,21 @@ export default function App() {
     flows: ["id", "startedAt", "state", "purpose"],
   };
   const searchField =
-    resource === "memberships" || resource === "enrollmentKeys"
+    resource === "memberships"
       ? "userId"
-      : resource === "grants" || resource === "flows"
-        ? "resourceId"
-        : resource === "audit"
-          ? "action"
-          : "q";
+      : resource === "enrollmentKeys"
+        ? "serviceAccountId"
+        : resource === "grants" || resource === "flows"
+          ? "resourceId"
+          : resource === "audit"
+            ? "action"
+            : "q";
   const filterField =
     resource === "users"
       ? "disabled"
-      : ["agents", "ingresses", "egresses"].includes(resource)
+      : ["agents", "serviceAccounts", "ingresses", "egresses"].includes(
+            resource,
+          )
         ? "status"
         : resource === "servers"
           ? "enabled"
@@ -347,6 +372,7 @@ export default function App() {
   }, [acceptSession]);
   useEffect(() => {
     const change = () => {
+      setDevice(currentDevice());
       setPage(currentPage());
       setQuery("");
       setFilter("all");
@@ -359,7 +385,7 @@ export default function App() {
   }, []);
   const refresh = useCallback(async () => {
     let viewer = activeUser.current;
-    if (!viewer) return;
+    if (!viewer || device) return;
     const id = ++sequence.current;
     request.current?.abort();
     const abort = new AbortController();
@@ -451,6 +477,7 @@ export default function App() {
     sortOrder,
     info?.serverURL,
     page,
+    device,
     viewScope,
     signOut,
   ]);
@@ -503,6 +530,7 @@ export default function App() {
       </>
     );
   const viewer = user;
+  if (device) return <DeviceAuthorizationPage id={device} user={viewer} />;
   const ownRole = state?.memberships.find(
     (m) => m.workspaceId === workspace && m.userId === viewer.id,
   )?.role;
@@ -585,12 +613,21 @@ export default function App() {
     let headers: string[] = [],
       rows: { key: string; cells: ReactNode[] }[] = [];
     if (resource === "agents") {
-      headers = ["Agent", "工作空间", "角色", "状态", "生效 Revision", "操作"];
+      headers = [
+        "Agent",
+        "工作空间",
+        "运行身份",
+        "角色",
+        "状态",
+        "生效 Revision",
+        "操作",
+      ];
       rows = (items as Agent[]).map((a) => ({
         key: a.id,
         cells: [
           <Cell title={a.name} subtitle={short(a.id)} />,
           name(state, "workspaces", a.workspaceId),
+          principalName(state, a.principal),
           <Tags items={agentRoles(a)} />,
           <div className="flex gap-1">
             <Status {...health(state, a)} />
@@ -607,7 +644,7 @@ export default function App() {
             </Button>
             {a.status !== "revoked" &&
               (canManage(state, viewer, a.workspaceId) ||
-                a.userId === viewer.id) && (
+                isSelf(a.principal, viewer)) && (
                 <Button
                   size="sm"
                   variant="destructive"
@@ -752,7 +789,7 @@ export default function App() {
           <Cell
             title={
               r.targetType === "server"
-                  ? r.name
+                ? r.name
                 : name(state, "agents", r.agentId)
             }
             subtitle={short(r.targetId)}
@@ -868,7 +905,7 @@ export default function App() {
     if (resource === "enrollmentKeys") {
       headers = [
         "密钥 / 工作空间",
-        "用户",
+        "服务账号",
         "角色",
         "使用次数",
         "截止",
@@ -882,7 +919,9 @@ export default function App() {
             title={short(k.id)}
             subtitle={name(state, "workspaces", k.workspaceId)}
           />,
-          name(state, "users", k.userId),
+          k.serviceAccountId
+            ? name(state, "serviceAccounts", k.serviceAccountId)
+            : `${name(state, "users", k.userId)}（旧版个人密钥）`,
           <Tags items={k.roles.map((x) => roleNames[x])} />,
           `${k.uses} / ${k.maxUses}`,
           time(k.expiresAt),
@@ -922,6 +961,77 @@ export default function App() {
             >
               撤销
             </Button>
+          ) : (
+            "—"
+          ),
+        ],
+      }));
+    }
+    if (resource === "serviceAccounts") {
+      headers = ["服务账号", "工作空间", "说明", "创建者", "状态", "操作"];
+      rows = (items as ServiceAccount[]).map((s) => ({
+        key: s.id,
+        cells: [
+          <Cell title={s.name} subtitle={short(s.id)} />,
+          name(state, "workspaces", s.workspaceId),
+          s.description || "—",
+          s.createdBy ? name(state, "users", s.createdBy) : "—",
+          <Status
+            label={s.status === "active" ? "有效" : "已撤销"}
+            tone={s.status === "active" ? "good" : "muted"}
+          />,
+          s.status === "active" && canManage(state, viewer, s.workspaceId) ? (
+            <div className="row-actions">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setForm({ kind: "key", serviceAccount: s })}
+              >
+                注册密钥
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  setForm({
+                    kind: "serviceAccountDescription",
+                    serviceAccount: s,
+                  })
+                }
+              >
+                编辑说明
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() =>
+                  ask(
+                    `撤销服务账号 ${s.name}`,
+                    "以该账号运行的全部设备、未使用的注册密钥和授权立即失效，且不能恢复。",
+                    async () => {
+                      result(
+                        viewer.admin
+                          ? await sdk.updateAdminServiceAccount({
+                              path: { id: s.id },
+                              body: { status: "revoked" },
+                              signal: requestSignal(),
+                            })
+                          : await sdk.updateWorkspaceServiceAccount({
+                              path: {
+                                workspaceId: s.workspaceId,
+                                serviceAccountId: s.id,
+                              },
+                              body: { status: "revoked" },
+                              signal: requestSignal(),
+                            }),
+                      );
+                    },
+                  )
+                }
+              >
+                撤销
+              </Button>
+            </div>
           ) : (
             "—"
           ),
@@ -1064,13 +1174,14 @@ export default function App() {
       }));
     }
     if (resource === "flows") {
-      headers = ["用途 / ID", "资源", "提供方", "状态", "租约截止"];
+      headers = ["用途 / ID", "资源", "提供方", "使用者", "状态", "租约截止"];
       rows = (items as FlowStatus[]).map((f) => ({
         key: f.id,
         cells: [
           <Cell title={roleNames[f.purpose]} subtitle={short(f.id)} />,
           resourceName(state, f.resourceId),
           name(state, "agents", f.agentId),
+          f.consumer ? principalName(state, f.consumer) : "匿名访问者",
           <Status
             label={
               f.state === "pending"
@@ -1139,6 +1250,7 @@ export default function App() {
           ? (
               {
                 grants: "grant",
+                serviceAccounts: "serviceAccount",
                 keys: "key",
                 members: "member",
                 workspaces: "workspace",
@@ -1149,7 +1261,10 @@ export default function App() {
   const canCreate =
     formKind === "user" || formKind === "workspace"
       ? viewer.admin
-      : formKind === "route" || formKind === "member"
+      : formKind === "route" ||
+          formKind === "member" ||
+          formKind === "key" ||
+          formKind === "serviceAccount"
         ? manager
         : formKind === "grant"
           ? developer
@@ -1263,6 +1378,7 @@ export default function App() {
                   {
                     {
                       key: "注册密钥",
+                      serviceAccount: "创建服务账号",
                       route: "创建出口路由",
                       grant: "添加授权",
                       member: "添加成员",
@@ -1323,7 +1439,7 @@ export default function App() {
                 placeholder={
                   searchField === "q"
                     ? "搜索名称或 ID…"
-                    : `${searchField === "userId" ? "用户 ID" : searchField === "resourceId" ? "资源 ID" : "审计动作"}（精确匹配）`
+                    : `${searchField === "userId" ? "用户 ID" : searchField === "serviceAccountId" ? "服务账号 ID" : searchField === "resourceId" ? "资源 ID" : "审计动作"}（精确匹配）`
                 }
               />
             </div>
@@ -1421,6 +1537,12 @@ export default function App() {
             </span>
           </div>
           {error && <Notice error>{error}</Notice>}
+          {page === "agents" && agentTab === "agents" && (
+            <Notice>
+              个人设备运行 <code>agentd login --config config.yaml</code>
+              ，在浏览器中确认工作空间和运行身份；无人值守的设备使用服务账号的注册密钥。
+            </Notice>
+          )}
           {state && !state.edgeAvailable && (
             <Notice>
               Edge 状态不可用；在线状态和活动流未知，配置仍可管理。

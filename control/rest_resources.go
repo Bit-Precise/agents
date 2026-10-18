@@ -173,7 +173,11 @@ func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, r
 			if !ok {
 				continue
 			}
-			rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"userId": v.UserID, "name": v.Name, "status": v.Status, "createdAt": timeKey(v.CreatedAt)}))
+			rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"principalType": v.Principal.Type, "principalId": v.Principal.ID, "createdBy": v.CreatedBy, "name": v.Name, "status": v.Status, "createdAt": timeKey(v.CreatedAt)}))
+		}
+	case "service-accounts":
+		for _, v := range snap.ServiceAccounts {
+			rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"name": v.Name, "status": v.Status, "createdBy": v.CreatedBy, "createdAt": timeKey(v.CreatedAt)}))
 		}
 	case "ingresses", "egresses":
 		role := "ingress"
@@ -197,7 +201,7 @@ func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, r
 		}
 	case "enrollment-keys":
 		for _, v := range snap.EnrollmentKeys {
-			rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"userId": v.UserID, "revoked": boolKey(v.Revoked), "expiresAt": timeKey(v.ExpiresAt)}))
+			rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"serviceAccountId": v.ServiceAccountID, "userId": v.UserID, "createdBy": v.CreatedBy, "revoked": boolKey(v.Revoked), "expiresAt": timeKey(v.ExpiresAt)}))
 		}
 	case "servers":
 		for _, v := range snap.Services {
@@ -235,7 +239,7 @@ func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, r
 			}
 		}
 		for _, v := range snap.Agents {
-			if v.UserID == u.ID {
+			if principalUser(v.Principal) == u.ID {
 				own[v.ID] = true
 			}
 		}
@@ -249,10 +253,14 @@ func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, r
 		} else {
 			for _, v := range view.Flows {
 				// Provider ownership never grants access to another consumer's destinations.
-				if !u.Admin && !managed[v.WorkspaceID] && v.UserID != u.ID {
+				var consumer api.Principal
+				if v.Consumer != nil {
+					consumer = *v.Consumer
+				}
+				if !u.Admin && !managed[v.WorkspaceID] && principalUser(consumer) != u.ID {
 					continue
 				}
-				rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"agentId": v.AgentID, "userId": v.UserID, "resourceId": v.ResourceID, "purpose": v.Purpose, "state": v.State, "startedAt": timeKey(v.StartedAt)}))
+				rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"agentId": v.AgentID, "consumerType": consumer.Type, "consumerId": consumer.ID, "resourceId": v.ResourceID, "purpose": v.Purpose, "state": v.State, "startedAt": timeKey(v.StartedAt)}))
 			}
 		}
 	default:
@@ -262,6 +270,15 @@ func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, r
 		rows = slices.DeleteFunc(rows, func(v resourceRow) bool { return v.workspaceID != workspaceID })
 	}
 	return rows, nil
+}
+
+// principalUser returns the User ID of a User principal and "" for anything else, so a
+// Service Account never matches the person who created or operates it.
+func principalUser(p api.Principal) string {
+	if p.Type == api.PrincipalUser {
+		return p.ID
+	}
+	return ""
 }
 func membershipMatches(snap types.Snapshot, workspaceID, userID, role string) bool {
 	for _, m := range snap.Memberships {

@@ -25,7 +25,7 @@ func TestPlatformBearerNeverLeaksToOriginWithServiceCookie(t *testing.T) {
 	defer origin.Close()
 	cfg := h.agentConfig(w.Name, "provider")
 	cfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: origin.URL}}}
-	enrolled, _ := h.enroll(cfg, w, u, []string{"serve"})
+	enrolled, _ := h.login(cfg, w, u)
 	h.runAgent(cfg, enrolled)
 	await(t, func() bool { return h.connected(enrolled.Agent.ID, "provider") })
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

@@ -66,7 +66,7 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
   const executablePath = await chromePath();
   const work = await mkdtemp(join(tmpdir(), "agents-console-ui-"));
   await chmod(work, 0o700);
-  let server, browser;
+  let server, browser, hydra;
   const errors = [], calls = [];
   const localTokens = new Set();
   const redact = (value) => {
@@ -79,6 +79,7 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
       await browser?.close();
     } finally {
       await stop(server);
+      await stop(hydra);
       await rm(work, { recursive: true, force: true });
     }
   });
@@ -94,6 +95,33 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
     await mkdir(state, { mode: 0o700 });
     const tokenFile = join(state, "admin.token");
     await writeFile(tokenFile, adminToken + "\n", { mode: 0o600 });
+    // With AGENTS_TEST_HYDRA_BIN, a real Hydra serves `agentd login` too.
+    let hydraConfig, hydraPublic, hydraAdmin;
+    if (process.env.AGENTS_TEST_HYDRA_BIN) {
+      const [publicPort, adminPort] = [await availablePort(), await availablePort()];
+      hydraPublic = `http://127.0.0.1:${publicPort}`;
+      hydraAdmin = `http://127.0.0.1:${adminPort}`;
+      const hydraFile = join(work, "hydra.yaml");
+      await writeFile(hydraFile, [
+        "dsn: memory",
+        `serve: {public: {host: 127.0.0.1, port: ${publicPort}}, admin: {host: 127.0.0.1, port: ${adminPort}}}`,
+        `urls: {self: {issuer: "${hydraPublic}"}, login: "${base}/oauth/login", consent: "${base}/oauth/consent", error: "${base}/oauth/error", device: {verification: "${base}/oauth/device", success: "${base}/oauth/device/done"}}`,
+        `secrets: {system: ["${randomBytes(24).toString("hex")}"]}`,
+        "strategies: {access_token: opaque}",
+        "oauth2: {device_authorization: {token_polling_interval: 1s}}",
+        "",
+      ].join("\n"), { mode: 0o600 });
+      hydra = spawn(process.env.AGENTS_TEST_HYDRA_BIN, ["serve", "all", "--dev", "--config", hydraFile], { cwd: work, stdio: "ignore" });
+      const ready = Date.now() + 15_000;
+      while (true) {
+        try {
+          if ((await fetch(hydraAdmin + "/health/ready", { signal: AbortSignal.timeout(1_000) })).ok) break;
+        } catch {}
+        assert.ok(Date.now() < ready, "local Hydra readiness timed out");
+        await delay(50);
+      }
+      hydraConfig = { enabled: true, publicURL: hydraPublic, adminURL: hydraAdmin };
+    }
     const config = join(work, "agents.json");
     await writeFile(config, JSON.stringify({
       listenAddress: `127.0.0.1:${port}`,
@@ -103,6 +131,7 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
       adminTokenFile: tokenFile,
       developmentHTTP: true,
       database: { type: "sqlite", dsn: join(state, "agents.sqlite") },
+      ...(hydraConfig ? { hydra: hydraConfig } : {}),
     }), { mode: 0o600 });
     server = spawn(binary, ["serve", "--config", config], { cwd: work, stdio: "ignore" });
     let spawnError;
@@ -143,8 +172,10 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
     const sharedWorkspace = await api("POST", "/v1/admin/workspaces", { name: "aaa-shared" }, adminToken, 201);
     await api("PUT", `/v1/admin/workspaces/${sharedWorkspace.id}/memberships/${user.user.id}`, { role: "developer" });
     const rule = { domain: { exact: "example.test" }, ports: [443], protocol: "tls" };
-    const enrollment = await api("POST", "/v1/admin/enrollment-keys", {
-      workspaceId: workspace.id, userId: user.user.id, roles: ["ingress", "serve", "egress"], maxUses: 1,
+    // Unattended fixtures run as a Service Account of the user's own Workspace.
+    const fleet = await api("POST", `/v1/workspaces/${workspace.id}/service-accounts`, { name: "ui-fleet", description: "UI fixtures" }, adminToken, 201);
+    const enrollment = await api("POST", `/v1/workspaces/${workspace.id}/service-accounts/${fleet.id}/enrollment-keys`, {
+      roles: ["ingress", "serve", "egress"], maxUses: 1,
     }, adminToken, 201);
     localTokens.add(enrollment.token);
     const enrolled = await api("POST", "/api/v1/enroll", {
@@ -263,6 +294,59 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
     const scoped = await apiAction(page, () => picker.getByRole("button", { name: /aaa-shared/ }).click(), `/v1/workspaces/${sharedWorkspace.id}/routes`);
     assert.equal(scoped.pagination.total, 0);
     await page.getByText("ui-egress", { exact: true }).waitFor({ state: "hidden" });
+    // The owner of the personal Workspace manages its Service Accounts.
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    await page.getByRole("button", { name: "aaa-shared", exact: true }).click();
+    await apiAction(page, () => page.getByRole("dialog").getByLabel("搜索工作空间").fill(workspace.name), "/v1/workspaces", { q: workspace.name });
+    await page.getByRole("dialog").getByRole("button", { name: new RegExp(workspace.name) }).click();
+    await page.getByRole("link", { name: "权限与成员", exact: true }).click();
+    const accounts = await apiAction(page, () => page.getByRole("tab", { name: "服务账号", exact: true }).click(), userBase + "/service-accounts");
+    assert.equal(accounts.pagination.total, 1);
+    await page.getByText("ui-fleet", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "创建服务账号", exact: true }).click();
+    await page.getByLabel("服务账号名称").fill("ui-created");
+    const accountCreation = page.waitForResponse((response) => new URL(response.url()).pathname === userBase + "/service-accounts" && response.request().method() === "POST");
+    const [createdAccount] = await Promise.all([accountCreation, page.getByRole("dialog").getByRole("button", { name: "确认保存", exact: true }).click()]);
+    assert.equal(createdAccount.status(), 201);
+    await page.getByText("ui-created", { exact: true }).waitFor();
+    t.diagnostic("Service Account management passed.");
+    if (hydraConfig) {
+      // `agentd login`: the device side runs here, the person confirms in the Console.
+      const instance = await api("GET", "/v1/instance", undefined, "");
+      const device = instance.deviceAuthorization;
+      assert.ok(device, "instance must advertise Device Flow");
+      let started;
+      for (const until = Date.now() + 10_000; ; await delay(100)) {
+        const response = await fetch(hydraPublic + "/oauth2/device/auth", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ client_id: device.clientId, scope: device.scope, audience: device.audience }) });
+        if (response.ok) { started = await response.json(); break; }
+        assert.ok(Date.now() < until, "Control did not register the device client");
+      }
+      await page.goto(started.verification_uri_complete);
+      await page.getByLabel("验证码").fill(started.user_code);
+      await page.getByRole("button", { name: "继续", exact: true }).click();
+      await page.getByRole("heading", { name: "注册 agentd 设备" }).waitFor();
+      await page.getByText(started.user_code, { exact: true }).waitFor();
+      await page.getByRole("radio", { name: /个人空间/ }).click();
+      await page.getByRole("radio", { name: /服务账号 ui-fleet/ }).waitFor();
+      await page.getByRole("radio", { name: /我自己/ }).click();
+      await page.getByRole("button", { name: "确认注册", exact: true }).click();
+      await page.getByRole("heading", { name: "设备已授权" }).waitFor();
+      let token;
+      for (const until = Date.now() + 10_000; !token; await delay(1_100)) {
+        const response = await fetch(hydraPublic + "/oauth2/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: started.device_code, client_id: device.clientId }) });
+        if (response.ok) token = (await response.json()).access_token;
+        assert.ok(token || Date.now() < until, "the confirmed authorization did not issue a token");
+      }
+      localTokens.add(token);
+      const registered = await api("POST", "/v1/agent-enrollments", {
+        instance: base, endpoint: base + "/agent", workspace: workspace.name, name: "ui-login", desired: { ingress: { enabled: true } },
+      }, token, 201);
+      for (const [key, value] of Object.entries(registered.credentials)) if (key.endsWith("Token") && value) localTokens.add(value);
+      assert.deepEqual(registered.agent.principal, { type: "user", id: user.user.id });
+      t.diagnostic("Device Flow confirmation through the Console and a real Hydra passed.");
+    }
     assert.equal(calls.some((call) => call.session === "user" && call.path.startsWith("/v1/admin/")), false, "ordinary pages must never request admin resources");
     assert.equal(calls.some((call) => /\/(?:api\/)?v1\/state$/.test(call.path)), false, "aggregate state requests are forbidden");
     assert.deepEqual(errors, [], "Console must not raise JavaScript errors");

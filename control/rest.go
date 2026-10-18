@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agents/control/types"
 )
 
@@ -98,6 +99,8 @@ func restID(r *http.Request, resource string) string {
 		return r.PathValue("routeId")
 	case "enrollment-keys":
 		return r.PathValue("keyId")
+	case "service-accounts":
+		return r.PathValue("serviceAccountId")
 	case "grants":
 		return r.PathValue("grantId")
 	case "connections":
@@ -111,7 +114,11 @@ func restID(r *http.Request, resource string) string {
 func (a *App) registerREST() {
 	m := a.router
 	m.HandleFunc("GET /v1/instance", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"serverURL": a.Config.ServerURL, "edgeURL": a.Config.EdgeURL, "developmentHTTP": a.Config.DevelopmentHTTP, "oidc": map[string]any{"enabled": a.oidc != nil, "loginURL": "/auth/oidc/login"}})
+		info := api.InstanceInfo{ServerURL: a.Config.ServerURL, EdgeURL: a.Config.EdgeURL, DevelopmentHTTP: a.Config.DevelopmentHTTP, OIDC: api.InstanceOIDC{Enabled: a.oidc != nil, LoginURL: "/auth/oidc/login"}}
+		if a.device != nil {
+			info.DeviceAuthorization = a.device.info()
+		}
+		writeJSON(w, 200, info)
 	})
 	m.HandleFunc("GET /v1/instance/status", a.restAuth(false, func(w http.ResponseWriter, r *http.Request, u types.User) {
 		snap, err := a.State.SnapshotForUser(u.ID)
@@ -148,6 +155,8 @@ func (a *App) registerREST() {
 	m.HandleFunc("GET /v1/admin/memberships", a.restRead("memberships", true))
 	m.HandleFunc("GET /v1/admin/agents", a.restRead("agents", true))
 	m.HandleFunc("GET /v1/admin/agents/{id}", a.restRead("agents", true))
+	m.HandleFunc("GET /v1/admin/service-accounts", a.restRead("service-accounts", true))
+	m.HandleFunc("GET /v1/admin/service-accounts/{id}", a.restRead("service-accounts", true))
 	m.HandleFunc("GET /v1/admin/enrollment-keys", a.restRead("enrollment-keys", true))
 	m.HandleFunc("GET /v1/admin/enrollment-keys/{id}", a.restRead("enrollment-keys", true))
 	m.HandleFunc("GET /v1/admin/servers", a.restRead("servers", true))
@@ -172,6 +181,8 @@ func (a *App) registerREST() {
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/users/{userId}", a.restRead("users", false))
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/agents", a.restRead("agents", false))
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/agents/{agentId}", a.restRead("agents", false))
+	m.HandleFunc("GET /v1/workspaces/{workspaceId}/service-accounts", a.restRead("service-accounts", false))
+	m.HandleFunc("GET /v1/workspaces/{workspaceId}/service-accounts/{serviceAccountId}", a.restRead("service-accounts", false))
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/enrollment-keys", a.restRead("enrollment-keys", false))
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/enrollment-keys/{keyId}", a.restRead("enrollment-keys", false))
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/servers", a.restRead("servers", false))
@@ -192,15 +203,18 @@ func (a *App) registerREST() {
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/memberships/{userId}", a.restRead("memberships", false))
 	m.HandleFunc("POST /v1/admin/users", a.restCreate("users", true))
 	m.HandleFunc("POST /v1/admin/workspaces", a.restCreate("workspaces", true))
-	m.HandleFunc("POST /v1/admin/enrollment-keys", a.restCreate("enrollment-keys", true))
+	m.HandleFunc("POST /v1/admin/service-accounts", a.restCreate("service-accounts", true))
 	m.HandleFunc("POST /v1/admin/routes", a.restCreate("routes", true))
 	m.HandleFunc("POST /v1/admin/grants", a.restCreate("grants", true))
-	m.HandleFunc("POST /v1/workspaces/{workspaceId}/enrollment-keys", a.restCreate("enrollment-keys", false))
+	m.HandleFunc("POST /v1/workspaces/{workspaceId}/service-accounts", a.restCreate("service-accounts", false))
+	m.HandleFunc("POST /v1/workspaces/{workspaceId}/service-accounts/{serviceAccountId}/enrollment-keys", a.restCreate("enrollment-keys", false))
 	m.HandleFunc("POST /v1/workspaces/{workspaceId}/routes", a.restCreate("routes", false))
 	m.HandleFunc("POST /v1/workspaces/{workspaceId}/grants", a.restCreate("grants", false))
 	m.HandleFunc("PATCH /v1/admin/users/{id}", a.restUpdate("users", true))
 	m.HandleFunc("PATCH /v1/admin/agents/{id}", a.restUpdate("agents", true))
 	m.HandleFunc("PATCH /v1/workspaces/{workspaceId}/agents/{agentId}", a.restUpdate("agents", false))
+	m.HandleFunc("PATCH /v1/admin/service-accounts/{id}", a.restUpdate("service-accounts", true))
+	m.HandleFunc("PATCH /v1/workspaces/{workspaceId}/service-accounts/{serviceAccountId}", a.restUpdate("service-accounts", false))
 	m.HandleFunc("PATCH /v1/admin/enrollment-keys/{id}", a.restUpdate("enrollment-keys", true))
 	m.HandleFunc("PATCH /v1/workspaces/{workspaceId}/enrollment-keys/{keyId}", a.restUpdate("enrollment-keys", false))
 	m.HandleFunc("PATCH /v1/admin/servers/{id}", a.restUpdate("servers", true))

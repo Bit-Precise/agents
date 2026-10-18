@@ -16,8 +16,11 @@ import (
 	"github.com/bit-precise/agents/control/types"
 )
 
+// browserSession is a Console or service session. OIDC marks one created by
+// an upstream IdP login rather than a pasted user token.
 type browserSession struct {
 	UserID, CSRF, ResourceID, Host string
+	OIDC                           bool
 	ExpiresAt                      time.Time
 }
 type loginCode struct {
@@ -73,9 +76,9 @@ func (a *App) readCookie(r *http.Request, purpose string) (string, bool) {
 	}
 	return value, n == 1 && value != ""
 }
-func (a *App) newSession(w http.ResponseWriter, user, resource, host string, expiry time.Time) (browserSession, error) {
+func (a *App) newSession(w http.ResponseWriter, user, resource, host string, oidc bool, expiry time.Time) (browserSession, error) {
 	token := randomSecret()
-	s := browserSession{UserID: user, CSRF: randomSecret(), ResourceID: resource, Host: host, ExpiresAt: expiry}
+	s := browserSession{UserID: user, CSRF: randomSecret(), ResourceID: resource, Host: host, OIDC: oidc, ExpiresAt: expiry}
 	a.auth.mu.Lock()
 	a.pruneAuth()
 	count := 0
@@ -173,7 +176,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	if !identity.ExpiresAt.IsZero() && identity.ExpiresAt.Before(expiry) {
 		expiry = identity.ExpiresAt
 	}
-	s, err := a.newSession(w, user.ID, "", authorityKey(r.Host, a.publicScheme()), expiry)
+	s, err := a.newSession(w, user.ID, "", authorityKey(r.Host, a.publicScheme()), false, expiry)
 	if err != nil {
 		apiError(w, 429, "capacity", "browser session limit reached")
 		return
@@ -274,7 +277,7 @@ func (a *App) serviceCallback(w http.ResponseWriter, r *http.Request) {
 	if entry.IdentityExpiresAt.Before(expiry) {
 		expiry = entry.IdentityExpiresAt
 	}
-	if _, err := a.newSession(w, entry.UserID, entry.ResourceID, entry.Host, expiry); err != nil {
+	if _, err := a.newSession(w, entry.UserID, entry.ResourceID, entry.Host, false, expiry); err != nil {
 		apiError(w, 429, "capacity", "browser session limit reached")
 		return
 	}

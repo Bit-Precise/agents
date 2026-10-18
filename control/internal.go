@@ -41,14 +41,11 @@ func (a *App) internalHandler() http.Handler {
 		respond(w, out, err, 200)
 	})
 	mux.HandleFunc("POST "+controlrpc.Prefix+"egress", func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			Workspace, User, Host string
-			Port                  int
-		}
+		var in controlrpc.Egress
 		if !decode(w, r, &in) {
 			return
 		}
-		out, err := a.State.ResolveEgress(in.Workspace, in.User, in.Host, in.Port)
+		out, err := a.State.ResolveEgress(in.Workspace, in.Consumer, in.Host, in.Port)
 		respond(w, out, err, 200)
 	})
 	mux.HandleFunc("POST "+controlrpc.Prefix+"watch", func(w http.ResponseWriter, r *http.Request) {

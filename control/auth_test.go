@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/bit-precise/agentd/api"
-	"github.com/bit-precise/agents/control/types"
 )
 
 func TestServiceLoginBrokerBindsHostStateAndAuthenticationExpiry(t *testing.T) {
@@ -40,14 +39,8 @@ func TestServiceLoginBrokerBindsHostStateAndAuthenticationExpiry(t *testing.T) {
 	if _, err = app.State.SetMembership(admin.ID, workspace.ID, user.ID, "developer"); err != nil {
 		t.Fatal(err)
 	}
-	_, key, err := app.State.CreateEnrollmentKey(admin.ID, types.EnrollmentKey{WorkspaceID: workspace.ID, UserID: user.ID, Roles: []string{"serve"}, MaxUses: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
 	desired := api.AgentSpec{Serve: api.ServeSpec{Enabled: true, Services: []api.ServiceSpec{{Name: "demo", Origin: "http://127.0.0.1:3000"}}}}
-	if _, err = app.State.Enroll(types.EnrollRequest{EnrollmentKey: key, Instance: cfg.ServerURL, Endpoint: cfg.EdgeURL, Workspace: "work", Name: "laptop", Desired: desired}); err != nil {
-		t.Fatal(err)
-	}
+	enrollDevice(t, app.State, user.ID, workspace, "laptop", desired)
 	nonce := strings.Repeat("a", 64)
 	target := "https://demo.work.agents.test/nested?app=ok"
 	authorize := func(target string) *httptest.ResponseRecorder {

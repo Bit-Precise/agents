@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bit-precise/agentd/api"
@@ -22,7 +23,10 @@ type Options struct {
 	Driver string
 	DSN    string
 }
-type Store struct{ sql *sql.DB }
+type Store struct {
+	sql    *sql.DB
+	driver string
+}
 
 func Open(ctx context.Context, options Options) (*Store, error) {
 	driver := options.Driver
@@ -58,9 +62,12 @@ func Open(ctx context.Context, options Options) (*Store, error) {
 			}
 		}
 	}
-	store := &Store{sql: conn}
+	store := &Store{sql: conn, driver: driver}
 	if err = store.migrate(ctx); err != nil {
 		return fail(err)
+	}
+	if err = store.migratePrincipals(ctx); err != nil {
+		return fail(fmt.Errorf("control migration 4: %w", err))
 	}
 	return store, nil
 }
@@ -81,7 +88,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err = tx.QueryRowContext(ctx, "SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil {
 		return err
 	}
-	if version < 1 || version > 3 {
+	if version < 1 || version > 4 {
 		return fmt.Errorf("unsupported control schema version %d", version)
 	}
 	if version == 1 {
@@ -160,7 +167,7 @@ func migrateApprovalRemoval(ctx context.Context, tx *sql.Tx) error {
 		if err := json.Unmarshal([]byte(payload), &old); err != nil {
 			return fmt.Errorf("decode agent %s: %w", id, err)
 		}
-		a := types.Agent{ID: old.ID, WorkspaceID: old.WorkspaceID, UserID: old.UserID, Name: old.Name, Status: old.Status, Roles: old.Roles, CreatedAt: old.CreatedAt,
+		a := types.Agent{ID: old.ID, WorkspaceID: old.WorkspaceID, Principal: api.Principal{Type: api.PrincipalUser, ID: old.UserID}, Name: old.Name, Status: old.Status, Roles: old.Roles, CreatedAt: old.CreatedAt,
 			Desired: api.AgentSpec{Ingress: api.IngressSpec{Enabled: old.Desired.Ingress.Enabled},
 				Serve:  api.ServeSpec{Enabled: old.Desired.Serve.Enabled, Services: old.Desired.Serve.Services},
 				Egress: api.EgressSpec{Enabled: old.Desired.Egress.Enabled, Allow: old.Desired.Egress.Allow, Deny: old.Desired.Egress.Deny}},
@@ -279,6 +286,121 @@ func rewritePayloads[T any](ctx context.Context, tx *sql.Tx, table string, chang
 	return nil
 }
 
+// principalSchema makes the Agent and enrollment-key owner a typed principal:
+// exactly one User or one same-Workspace Service Account, enforced by CHECK and
+// composite foreign keys. SQLite cannot alter constraints, so it rebuilds those
+// tables with foreign key enforcement suspended for the migration only.
+var sqlitePrincipalSchema = []string{
+	`CREATE TABLE service_accounts (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id),name TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(workspace_id,id),UNIQUE(workspace_id,name))`,
+	`CREATE TABLE agents_v4 (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id),user_id TEXT REFERENCES users(id),service_account_id TEXT,name TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(workspace_id,id),UNIQUE(workspace_id,name),FOREIGN KEY(workspace_id,service_account_id) REFERENCES service_accounts(workspace_id,id),CHECK((user_id IS NULL) <> (service_account_id IS NULL)))`,
+	`INSERT INTO agents_v4(id,workspace_id,user_id,service_account_id,name,payload) SELECT id,workspace_id,user_id,NULL,name,payload FROM agents`,
+	`DROP TABLE agents`,
+	`ALTER TABLE agents_v4 RENAME TO agents`,
+	`CREATE TABLE enrollment_keys_v4 (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id),user_id TEXT REFERENCES users(id),service_account_id TEXT,payload TEXT NOT NULL,UNIQUE(workspace_id,id),FOREIGN KEY(workspace_id,service_account_id) REFERENCES service_accounts(workspace_id,id),CHECK((user_id IS NULL) <> (service_account_id IS NULL)))`,
+	`INSERT INTO enrollment_keys_v4(id,workspace_id,user_id,service_account_id,payload) SELECT id,workspace_id,user_id,NULL,payload FROM enrollment_keys`,
+	`DROP TABLE enrollment_keys`,
+	`ALTER TABLE enrollment_keys_v4 RENAME TO enrollment_keys`,
+	`ALTER TABLE tokens ADD COLUMN service_account_id TEXT REFERENCES service_accounts(id)`,
+	`CREATE TABLE grants_v4 (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id),resource_type TEXT NOT NULL CHECK(resource_type IN ('service','egress')),service_id TEXT,route_id TEXT,subject_type TEXT NOT NULL CHECK(subject_type IN ('user','workspace','anonymous','service_account')),subject_user_id TEXT REFERENCES users(id),subject_workspace_id TEXT REFERENCES workspaces(id),subject_service_account_id TEXT REFERENCES service_accounts(id),payload TEXT NOT NULL,FOREIGN KEY(workspace_id,service_id) REFERENCES services(workspace_id,id),FOREIGN KEY(workspace_id,route_id) REFERENCES egress_routes(workspace_id,id),` + resourceCheck + `,` + subjectCheck + `)`,
+	`INSERT INTO grants_v4(id,workspace_id,resource_type,service_id,route_id,subject_type,subject_user_id,subject_workspace_id,subject_service_account_id,payload) SELECT id,workspace_id,resource_type,service_id,route_id,subject_type,subject_user_id,subject_workspace_id,NULL,payload FROM grants`,
+	`DROP TABLE grants`,
+	`ALTER TABLE grants_v4 RENAME TO grants`,
+	`CREATE TABLE enrollment_authorizations (id TEXT PRIMARY KEY,payload TEXT NOT NULL)`,
+}
+
+const resourceCheck = `CHECK((resource_type='service' AND service_id IS NOT NULL AND route_id IS NULL) OR (resource_type='egress' AND route_id IS NOT NULL AND service_id IS NULL))`
+const subjectCheck = `CHECK((subject_type='user' AND subject_user_id IS NOT NULL AND subject_workspace_id IS NULL AND subject_service_account_id IS NULL) OR (subject_type='workspace' AND subject_workspace_id IS NOT NULL AND subject_user_id IS NULL AND subject_service_account_id IS NULL) OR (subject_type='service_account' AND subject_service_account_id IS NOT NULL AND subject_user_id IS NULL AND subject_workspace_id IS NULL) OR (subject_type='anonymous' AND subject_user_id IS NULL AND subject_workspace_id IS NULL AND subject_service_account_id IS NULL AND resource_type='service'))`
+
+var postgresPrincipalSchema = []string{
+	`CREATE TABLE service_accounts (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id),name TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(workspace_id,id),UNIQUE(workspace_id,name))`,
+	`ALTER TABLE agents ALTER COLUMN user_id DROP NOT NULL`,
+	`ALTER TABLE agents ADD COLUMN service_account_id TEXT`,
+	`ALTER TABLE agents ADD CONSTRAINT agents_service_account_fkey FOREIGN KEY(workspace_id,service_account_id) REFERENCES service_accounts(workspace_id,id)`,
+	`ALTER TABLE agents ADD CONSTRAINT agents_principal_check CHECK((user_id IS NULL) <> (service_account_id IS NULL))`,
+	`ALTER TABLE enrollment_keys ALTER COLUMN user_id DROP NOT NULL`,
+	`ALTER TABLE enrollment_keys ADD COLUMN service_account_id TEXT`,
+	`ALTER TABLE enrollment_keys ADD CONSTRAINT enrollment_keys_service_account_fkey FOREIGN KEY(workspace_id,service_account_id) REFERENCES service_accounts(workspace_id,id)`,
+	`ALTER TABLE enrollment_keys ADD CONSTRAINT enrollment_keys_principal_check CHECK((user_id IS NULL) <> (service_account_id IS NULL))`,
+	`ALTER TABLE tokens ADD COLUMN service_account_id TEXT REFERENCES service_accounts(id)`,
+	`ALTER TABLE grants ADD COLUMN subject_service_account_id TEXT REFERENCES service_accounts(id)`,
+	`ALTER TABLE grants ADD CONSTRAINT grants_subject_type_v4_check CHECK(subject_type IN ('user','workspace','anonymous','service_account'))`,
+	`ALTER TABLE grants ADD CONSTRAINT grants_subject_v4_check ` + subjectCheck,
+	`CREATE TABLE enrollment_authorizations (id TEXT PRIMARY KEY,payload TEXT NOT NULL)`,
+}
+
+// migratePrincipals is schema version 4. Existing Agents become User
+// principals with their original IDs; legacy User enrollment keys stay valid.
+func (s *Store) migratePrincipals(ctx context.Context) error {
+	var version int
+	if err := s.sql.QueryRowContext(ctx, "SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil {
+		return err
+	}
+	if version != 3 {
+		return nil
+	}
+	statements := postgresPrincipalSchema
+	if s.driver == "sqlite" {
+		statements = sqlitePrincipalSchema
+		// PRAGMA foreign_keys is a no-op inside a transaction. The single
+		// connection keeps it off only for this migration.
+		if _, err := s.sql.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+			return err
+		}
+		defer func() { _, _ = s.sql.ExecContext(context.Background(), "PRAGMA foreign_keys = ON") }()
+	}
+	tx, err := s.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if s.driver != "sqlite" {
+		// Drop the version-1 subject constraints by definition; PostgreSQL
+		// generated their names.
+		var names []string
+		if err := eachRow(ctx, tx, `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'grants'::regclass AND contype = 'c'`, func(name, definition string) error {
+			if strings.Contains(definition, "subject_type") {
+				names = append(names, name)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, name := range names {
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE grants DROP CONSTRAINT "`+name+`"`); err != nil {
+				return err
+			}
+		}
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	if err := rewritePayloads(ctx, tx, "agents", func(a *map[string]any) {
+		if userID, ok := (*a)["userId"].(string); ok {
+			(*a)["principal"] = map[string]string{"type": "user", "id": userID}
+			delete(*a, "userId")
+		}
+	}); err != nil {
+		return err
+	}
+	if s.driver == "sqlite" {
+		rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")
+		if err != nil {
+			return err
+		}
+		violation := rows.Next()
+		_ = rows.Close()
+		if violation {
+			return errors.New("foreign key violation after rebuilding tables")
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE control_meta SET schema_version=4 WHERE id=1"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func eachRow(ctx context.Context, tx *sql.Tx, query string, fn func(a, b string) error) error {
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
@@ -357,7 +479,7 @@ func (s *Store) Load(ctx context.Context) (types.Snapshot, error) {
 	if err = tx.QueryRowContext(ctx, "SELECT revision FROM control_meta WHERE id=1").Scan(&snap.Revision); err != nil {
 		return snap, err
 	}
-	calls := []func() error{func() error { return loadRows(ctx, tx, "users", &snap.Users) }, func() error { return loadRows(ctx, tx, "workspaces", &snap.Workspaces) }, func() error { return loadRows(ctx, tx, "memberships", &snap.Memberships) }, func() error { return loadRows(ctx, tx, "agents", &snap.Agents) }, func() error { return loadRows(ctx, tx, "enrollment_keys", &snap.EnrollmentKeys) }, func() error { return loadRows(ctx, tx, "services", &snap.Services) }, func() error { return loadRows(ctx, tx, "egress_routes", &snap.EgressRoutes) }, func() error { return loadRows(ctx, tx, "grants", &snap.Grants) }, func() error { return loadRows(ctx, tx, "tokens", &snap.Tokens) }, func() error { return loadRows(ctx, tx, "audit", &snap.Audit) }}
+	calls := []func() error{func() error { return loadRows(ctx, tx, "users", &snap.Users) }, func() error { return loadRows(ctx, tx, "workspaces", &snap.Workspaces) }, func() error { return loadRows(ctx, tx, "memberships", &snap.Memberships) }, func() error { return loadRows(ctx, tx, "service_accounts", &snap.ServiceAccounts) }, func() error { return loadRows(ctx, tx, "enrollment_authorizations", &snap.EnrollmentAuthorizations) }, func() error { return loadRows(ctx, tx, "agents", &snap.Agents) }, func() error { return loadRows(ctx, tx, "enrollment_keys", &snap.EnrollmentKeys) }, func() error { return loadRows(ctx, tx, "services", &snap.Services) }, func() error { return loadRows(ctx, tx, "egress_routes", &snap.EgressRoutes) }, func() error { return loadRows(ctx, tx, "grants", &snap.Grants) }, func() error { return loadRows(ctx, tx, "tokens", &snap.Tokens) }, func() error { return loadRows(ctx, tx, "audit", &snap.Audit) }}
 	for _, load := range calls {
 		if err = load(); err != nil {
 			return snap, err
@@ -410,11 +532,19 @@ var tables = []table{
 	{"memberships", []string{"workspace_id", "user_id"}, []string{"role"}, true, func(s types.Snapshot) ([]row, error) {
 		return encodeAll(s.Memberships, func(v types.Membership) (row, error) { return encodedRow(v, v.WorkspaceID, v.UserID, v.Role) })
 	}},
-	{"agents", []string{"id"}, []string{"workspace_id", "user_id", "name"}, true, func(s types.Snapshot) ([]row, error) {
-		return encodeAll(s.Agents, func(v types.Agent) (row, error) { return encodedRow(v, v.ID, v.WorkspaceID, v.UserID, v.Name) })
+	{"service_accounts", []string{"id"}, []string{"workspace_id", "name"}, true, func(s types.Snapshot) ([]row, error) {
+		return encodeAll(s.ServiceAccounts, func(v types.ServiceAccount) (row, error) { return encodedRow(v, v.ID, v.WorkspaceID, v.Name) })
 	}},
-	{"enrollment_keys", []string{"id"}, []string{"workspace_id", "user_id"}, true, func(s types.Snapshot) ([]row, error) {
-		return encodeAll(s.EnrollmentKeys, func(v types.EnrollmentKey) (row, error) { return encodedRow(v, v.ID, v.WorkspaceID, v.UserID) })
+	{"agents", []string{"id"}, []string{"workspace_id", "user_id", "service_account_id", "name"}, true, func(s types.Snapshot) ([]row, error) {
+		return encodeAll(s.Agents, func(v types.Agent) (row, error) {
+			user, account := principalColumns(v.Principal)
+			return encodedRow(v, v.ID, v.WorkspaceID, user, account, v.Name)
+		})
+	}},
+	{"enrollment_keys", []string{"id"}, []string{"workspace_id", "user_id", "service_account_id"}, true, func(s types.Snapshot) ([]row, error) {
+		return encodeAll(s.EnrollmentKeys, func(v types.EnrollmentKey) (row, error) {
+			return encodedRow(v, v.ID, v.WorkspaceID, nullable(v.UserID), nullable(v.ServiceAccountID))
+		})
 	}},
 	{"services", []string{"id"}, []string{"workspace_id", "agent_id", "name", "hostname"}, true, func(s types.Snapshot) ([]row, error) {
 		return encodeAll(s.Services, func(v types.Service) (row, error) {
@@ -424,20 +554,23 @@ var tables = []table{
 	{"egress_routes", []string{"id"}, []string{"workspace_id", "agent_id", "name"}, true, func(s types.Snapshot) ([]row, error) {
 		return encodeAll(s.EgressRoutes, func(v types.EgressRoute) (row, error) { return encodedRow(v, v.ID, v.WorkspaceID, v.AgentID, v.Name) })
 	}},
-	{"grants", []string{"id"}, []string{"workspace_id", "resource_type", "service_id", "route_id", "subject_type", "subject_user_id", "subject_workspace_id"}, true, func(s types.Snapshot) ([]row, error) {
+	{"grants", []string{"id"}, []string{"workspace_id", "resource_type", "service_id", "route_id", "subject_type", "subject_user_id", "subject_workspace_id", "subject_service_account_id"}, true, func(s types.Snapshot) ([]row, error) {
 		return encodeAll(s.Grants, func(v types.Grant) (row, error) {
-			var service, route, user, workspace any
+			var service, route, user, workspace, account any
 			if v.ResourceType == "service" {
 				service = v.ResourceID
 			} else {
 				route = v.ResourceID
 			}
-			if v.SubjectType == "user" {
+			switch v.SubjectType {
+			case "user":
 				user = v.SubjectID
-			} else if v.SubjectType == "workspace" {
+			case "workspace":
 				workspace = v.SubjectID
+			case "service_account":
+				account = v.SubjectID
 			}
-			return encodedRow(v, v.ID, v.WorkspaceID, v.ResourceType, service, route, v.SubjectType, user, workspace)
+			return encodedRow(v, v.ID, v.WorkspaceID, v.ResourceType, service, route, v.SubjectType, user, workspace, account)
 		})
 	}},
 	{"names", []string{"workspace_id", "label"}, []string{"agent_id", "service_id"}, false, func(s types.Snapshot) ([]row, error) {
@@ -450,21 +583,31 @@ var tables = []table{
 		}
 		return rows, nil
 	}},
-	{"tokens", []string{"id"}, []string{"hash", "kind", "user_id", "workspace_id", "agent_id", "enrollment_key_id"}, true, func(s types.Snapshot) ([]row, error) {
+	{"tokens", []string{"id"}, []string{"hash", "kind", "user_id", "service_account_id", "workspace_id", "agent_id", "enrollment_key_id"}, true, func(s types.Snapshot) ([]row, error) {
 		return encodeAll(s.Tokens, func(v types.Token) (row, error) {
 			var key any
 			if v.Kind == "enrollment" {
 				key = v.ID
 			}
-			return encodedRow(v, v.ID, v.Hash, v.Kind, nullable(v.UserID), nullable(v.WorkspaceID), nullable(v.AgentID), key)
+			return encodedRow(v, v.ID, v.Hash, v.Kind, nullable(v.UserID), nullable(v.ServiceAccountID), nullable(v.WorkspaceID), nullable(v.AgentID), key)
 		})
 	}},
 	{"oidc_identities", []string{"issuer", "subject"}, []string{"user_id"}, true, func(s types.Snapshot) ([]row, error) {
 		return encodeAll(s.OIDCIdentities, func(v types.OIDCIdentity) (row, error) { return encodedRow(v, v.Issuer, v.Subject, v.UserID) })
 	}},
+	{"enrollment_authorizations", []string{"id"}, nil, true, func(s types.Snapshot) ([]row, error) {
+		return encodeAll(s.EnrollmentAuthorizations, func(v types.EnrollmentAuthorization) (row, error) { return encodedRow(v, v.ID) })
+	}},
 	{"audit", []string{"id"}, nil, true, func(s types.Snapshot) ([]row, error) {
 		return encodeAll(s.Audit, func(v types.Audit) (row, error) { return encodedRow(v, v.ID) })
 	}},
+}
+
+func principalColumns(p api.Principal) (user, account any) {
+	if p.Type == api.PrincipalServiceAccount {
+		return nil, p.ID
+	}
+	return p.ID, nil
 }
 
 func encodeAll[T any](values []T, encode func(T) (row, error)) ([]row, error) {

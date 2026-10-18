@@ -23,19 +23,20 @@ type resourceCollection struct {
 type querySpec struct{ filters, sorts []string }
 
 var resourceQueries = map[string]querySpec{
-	"users":           {[]string{"q", "disabled", "admin", "workspaceId"}, []string{"id", "name", "createdAt"}},
-	"workspaces":      {[]string{"q", "userId", "ownerId"}, []string{"id", "name", "createdAt"}},
-	"memberships":     {[]string{"workspaceId", "userId", "role"}, []string{"id", "workspaceId", "userId", "role"}},
-	"agents":          {[]string{"workspaceId", "userId", "status", "q"}, []string{"id", "name", "createdAt", "status"}},
-	"ingresses":       {[]string{"workspaceId", "agentId", "status", "enabled", "q"}, []string{"id", "name", "status"}},
-	"egresses":        {[]string{"workspaceId", "agentId", "status", "enabled", "q"}, []string{"id", "name", "status"}},
-	"enrollment-keys": {[]string{"workspaceId", "userId", "revoked"}, []string{"id", "expiresAt"}},
-	"servers":         {[]string{"workspaceId", "agentId", "enabled", "q"}, []string{"id", "name", "hostname"}},
-	"routes":          {[]string{"workspaceId", "agentId", "kind", "enabled", "q"}, []string{"id", "name", "kind", "priority"}},
-	"grants":          {[]string{"workspaceId", "resourceType", "resourceId", "subjectType", "subjectId", "revoked"}, []string{"id", "startsAt", "expiresAt"}},
-	"audit-events":    {[]string{"actorId", "resourceId", "action"}, []string{"id", "at", "action"}},
-	"connections":     {[]string{"workspaceId", "agentId", "role"}, []string{"id", "connectedAt", "role"}},
-	"flows":           {[]string{"workspaceId", "agentId", "userId", "resourceId", "purpose"}, []string{"id", "startedAt", "state", "purpose"}},
+	"users":            {[]string{"q", "disabled", "admin", "workspaceId"}, []string{"id", "name", "createdAt"}},
+	"workspaces":       {[]string{"q", "userId", "ownerId"}, []string{"id", "name", "createdAt"}},
+	"memberships":      {[]string{"workspaceId", "userId", "role"}, []string{"id", "workspaceId", "userId", "role"}},
+	"agents":           {[]string{"workspaceId", "principalType", "principalId", "createdBy", "status", "q"}, []string{"id", "name", "createdAt", "status"}},
+	"service-accounts": {[]string{"workspaceId", "status", "createdBy", "q"}, []string{"id", "name", "createdAt", "status"}},
+	"ingresses":        {[]string{"workspaceId", "agentId", "status", "enabled", "q"}, []string{"id", "name", "status"}},
+	"egresses":         {[]string{"workspaceId", "agentId", "status", "enabled", "q"}, []string{"id", "name", "status"}},
+	"enrollment-keys":  {[]string{"workspaceId", "serviceAccountId", "userId", "createdBy", "revoked"}, []string{"id", "expiresAt"}},
+	"servers":          {[]string{"workspaceId", "agentId", "enabled", "q"}, []string{"id", "name", "hostname"}},
+	"routes":           {[]string{"workspaceId", "agentId", "kind", "enabled", "q"}, []string{"id", "name", "kind", "priority"}},
+	"grants":           {[]string{"workspaceId", "resourceType", "resourceId", "subjectType", "subjectId", "revoked"}, []string{"id", "startsAt", "expiresAt"}},
+	"audit-events":     {[]string{"actorId", "resourceId", "action"}, []string{"id", "at", "action"}},
+	"connections":      {[]string{"workspaceId", "agentId", "role"}, []string{"id", "connectedAt", "role"}},
+	"flows":            {[]string{"workspaceId", "agentId", "consumerType", "consumerId", "resourceId", "purpose"}, []string{"id", "startedAt", "state", "purpose"}},
 }
 
 func invalidQuery(message string) error {

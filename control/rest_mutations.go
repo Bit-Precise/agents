@@ -57,13 +57,11 @@ func (a *App) restCreate(resource string, admin bool) http.HandlerFunc {
 			value = workspace
 			id = workspace.ID
 			err = e
-		case "enrollment-keys":
+		case "service-accounts":
 			var body struct {
 				WorkspaceID json.RawMessage `json:"workspaceId"`
-				UserID      string          `json:"userId"`
-				Roles       []string        `json:"roles"`
-				MaxUses     int             `json:"maxUses"`
-				ExpiresAt   time.Time       `json:"expiresAt"`
+				Name        string          `json:"name"`
+				Description string          `json:"description"`
 			}
 			if !decode(w, r, &body) {
 				return
@@ -73,10 +71,27 @@ func (a *App) restCreate(resource string, admin bool) http.HandlerFunc {
 				respond(w, nil, e, 201)
 				return
 			}
-			key, token, e := a.State.CreateEnrollmentKey(u.ID, types.EnrollmentKey{WorkspaceID: workspace, UserID: body.UserID, Roles: body.Roles, MaxUses: body.MaxUses, ExpiresAt: body.ExpiresAt})
-			value = map[string]any{"key": key, "token": token}
-			id = key.ID
+			sa, e := a.State.CreateServiceAccount(u.ID, workspace, body.Name, body.Description)
+			value = sa
+			id = sa.ID
 			err = e
+		case "enrollment-keys":
+			// The Service Account and Workspace come only from the path; a key
+			// never names a User.
+			var body struct {
+				Roles     []string  `json:"roles"`
+				MaxUses   int       `json:"maxUses"`
+				ExpiresAt time.Time `json:"expiresAt"`
+			}
+			if !decode(w, r, &body) {
+				return
+			}
+			key, token, e := a.State.CreateEnrollmentKey(u.ID, types.EnrollmentKey{WorkspaceID: r.PathValue("workspaceId"), ServiceAccountID: r.PathValue("serviceAccountId"), Roles: body.Roles, MaxUses: body.MaxUses, ExpiresAt: body.ExpiresAt})
+			if e == nil {
+				w.Header().Set("Location", "/v1/workspaces/"+key.WorkspaceID+"/enrollment-keys/"+key.ID)
+			}
+			respond(w, map[string]any{"key": key, "token": token}, e, 201)
+			return
 		case "routes":
 			var body struct {
 				WorkspaceID json.RawMessage `json:"workspaceId"`
@@ -148,6 +163,10 @@ func (a *App) visibleResource(r *http.Request, u types.User, resource string) (r
 	}
 	return resourceRow{}, &types.Error{Kind: types.KindNotFound, Message: "resource not found"}
 }
+func (a *App) visibleValue(r *http.Request, u types.User, resource string) (any, error) {
+	row, err := a.visibleResource(r, u, resource)
+	return row.value, err
+}
 func (a *App) restUpdate(resource string, admin bool) http.HandlerFunc {
 	return a.restAuth(admin, func(w http.ResponseWriter, r *http.Request, u types.User) {
 		current, err := a.visibleResource(r, u, resource)
@@ -186,6 +205,26 @@ func (a *App) restUpdate(resource string, admin bool) http.HandlerFunc {
 			err = a.State.RevokeAgent(u.ID, current.id)
 			if err == nil {
 				value, err = a.State.Agent(current.id)
+			}
+		case "service-accounts":
+			var body struct {
+				Description *string `json:"description"`
+				Status      *string `json:"status"`
+			}
+			if !decode(w, r, &body) {
+				return
+			}
+			switch {
+			case body.Status != nil && body.Description == nil && *body.Status == "revoked":
+				err = a.State.RevokeServiceAccount(u.ID, current.id)
+			case body.Status == nil && body.Description != nil:
+				_, err = a.State.UpdateServiceAccount(u.ID, current.id, *body.Description)
+			default:
+				apiError(w, 400, "invalid", "send either description or status:revoked")
+				return
+			}
+			if err == nil {
+				value, err = a.visibleValue(r, u, resource)
 			}
 		case "enrollment-keys", "grants":
 			var body struct {

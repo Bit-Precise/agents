@@ -53,7 +53,7 @@ docker buildx build --ssh default --platform linux/amd64,linux/arm64 --target co
 
 - [实体、状态机与关系（权威）](docs/model.md)
 - [组件、路由与接口](docs/backend-implementation.md)
-- [User / Service Account 与 Hydra Device Flow 目标设计](docs/identity-and-device-flow.md)（待实现；区分设备归属、运行主体与登录操作人，接入不设人工审批）
+- [User / Service Account 与 Hydra Device Flow 设计](docs/identity-and-device-flow.md)（区分设备归属、运行主体与登录操作人，接入不设人工审批）
 - [Edge 授权与租约](edge/README.md)
 - [来源与依赖](THIRD_PARTY_NOTICES.md)
 
@@ -67,6 +67,6 @@ Console 使用 React、TypeScript、shadcn/ui。前端 API 类型、客户端和
 
 认证支持标准 OIDC discovery、授权码 + PKCE、state/nonce 和 ID token 校验，并按 issuer + subject 绑定用户。新用户获得仅自己为 owner 的 `personal-<userID>` Workspace，已有用户不补建。配置中的 bootstrap 管理员 subject 仅首次创建账户时生效；`oidc.adminEmails` 可按已验证邮箱授予实例管理员，要求 ID token 的 `email_verified` 为布尔值 `true`，移除名单后重启 Control 会撤销邮箱派生的管理员权限。Token 登录保留给自动化与应急管理。
 
-已确认的下一版身份设计增加单 Workspace 的 Service Account 和独立 Hydra：agentd 用 OAuth Device Flow 引导人类用户完成 OIDC、选择 Workspace 和本人/SA 身份，再以限定用途的 access token 换取每设备独立凭据。身份、权限与策略自动校验通过即接入，取消人工审批；配置变更也按策略直接接受或拒绝。SA 由 maintainer 及以上管理，不能登录 Console。当前实现已取消人工审批（注册与配置变更由 Control 自动校验，见 [model](docs/model.md)），但仍是 User 绑定设备，尚未交付 SA 与 Device Flow；详细流程、API 增量、撤权和迁移要求见上述目标设计。
+Agent 属于 Workspace，运行主体恰为一个 User 或单 Workspace 的 Service Account。个人设备执行 `agentd login`：经 Hydra 的 OAuth Device Flow，本人在浏览器完成 SSO、选择 Workspace 与本人/SA 身份，再以限定用途、一次性的 access token 换取每设备独立凭据；无人值守设备使用服务账号的注册密钥。身份、权限与策略自动校验通过即接入，没有人工审批；配置变更也按策略直接接受或拒绝。SA 由 maintainer 及以上管理，不能登录 Console。实体与状态机见 [model](docs/model.md)。
 
-目前没有真实 CDN 兼容性验收、自动秘密轮换或多 Edge 目录。OIDC 增加显式 v1→v2 数据库迁移，保留现有用户、设备、授权和凭据。Control 启动时需要身份提供方 discovery 可达；浏览器会话不超过 ID token 到期时间及 8 小时，不持久化 IdP tokens。
+目前没有真实 CDN 兼容性验收、自动秘密轮换或多 Edge 目录。OIDC（v1→v2）、取消审批（v2→v3）与 Service Account（v3→v4）都是显式数据库迁移，保留现有用户、设备、授权和凭据。Control 启动时需要身份提供方 discovery 可达；浏览器会话不超过 ID token 到期时间及 8 小时，不持久化 IdP tokens。

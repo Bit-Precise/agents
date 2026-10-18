@@ -142,6 +142,61 @@
         "description": "Control validates the desired spec automatically: 400 invalid, 403 beyond the role ceiling or policy, 409 name conflict. On success the new effective configuration applies at once; nothing waits for approval."
       }
     },
+    "/v1/agent-enrollments": {
+      "post": {
+        "operationId": "createAgentEnrollment",
+        "tags": [
+          "Device protocol"
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollResponse"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Created resource URL",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [],
+        "security": [
+          {
+            "registrationToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentEnrollment"
+              }
+            }
+          }
+        },
+        "description": "Exchanges a Device Flow access token for exactly one new Agent. A second exchange of the same authorization returns 409."
+      }
+    },
     "/auth/oidc/login": {
       "get": {
         "operationId": "oidcLogin",
@@ -240,6 +295,301 @@
             "description": "Authentication error"
           }
         }
+      }
+    },
+    "/oauth/device": {
+      "get": {
+        "operationId": "deviceVerification",
+        "tags": [
+          "Browser authentication"
+        ],
+        "security": [],
+        "description": "Browser navigation endpoint, not an AJAX API. Hydra's device verification URL: asks for the code agentd printed; the form posts back here and continues at Hydra.",
+        "parameters": [
+          {
+            "name": "device_challenge",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Code form"
+          },
+          "default": {
+            "description": "Invalid link"
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitDeviceCode",
+        "tags": [
+          "Browser authentication"
+        ],
+        "security": [],
+        "description": "Same-origin form post of device_challenge and user_code.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "device_challenge": {
+                    "type": "string"
+                  },
+                  "user_code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "device_challenge",
+                  "user_code"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "303": {
+            "description": "Continue at the authorization server"
+          },
+          "default": {
+            "description": "Code form with an error"
+          }
+        }
+      }
+    },
+    "/oauth/login": {
+      "get": {
+        "operationId": "deviceLogin",
+        "tags": [
+          "Browser authentication"
+        ],
+        "security": [],
+        "description": "Browser navigation endpoint, not an AJAX API. Hydra's login URL: requires the person's single sign-on session and continues at the Console confirmation page.",
+        "parameters": [
+          {
+            "name": "login_challenge",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Continue to sign-in or confirmation"
+          },
+          "default": {
+            "description": "Error page"
+          }
+        }
+      }
+    },
+    "/oauth/consent": {
+      "get": {
+        "operationId": "deviceConsent",
+        "tags": [
+          "Browser authentication"
+        ],
+        "security": [],
+        "description": "Browser navigation endpoint, not an AJAX API. Hydra's consent URL: grants only agents:enroll for the registration audience when the request matches the confirmed authorization.",
+        "parameters": [
+          {
+            "name": "consent_challenge",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Continue at the authorization server"
+          },
+          "default": {
+            "description": "Error page"
+          }
+        }
+      }
+    },
+    "/oauth/device/done": {
+      "get": {
+        "operationId": "deviceDone",
+        "tags": [
+          "Browser authentication"
+        ],
+        "security": [],
+        "description": "Browser navigation endpoint, not an AJAX API. Hydra's device success URL.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Return to the terminal"
+          }
+        }
+      }
+    },
+    "/oauth/error": {
+      "get": {
+        "operationId": "deviceError",
+        "tags": [
+          "Browser authentication"
+        ],
+        "security": [],
+        "description": "Browser navigation endpoint, not an AJAX API. Hydra's error URL; error and error_description are display text.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Error page"
+          }
+        }
+      }
+    },
+    "/v1/device-authorizations/{id}": {
+      "get": {
+        "operationId": "getDeviceAuthorization",
+        "tags": [
+          "Device authorization"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceAuthorizationView"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "description": "Console session of the person confirming `agentd login`, verified by single sign-on, in the browser that began this authorization. Bearer tokens are rejected."
+      }
+    },
+    "/v1/device-authorizations/{id}/confirm": {
+      "post": {
+        "operationId": "confirmDeviceAuthorization",
+        "tags": [
+          "Device authorization"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceRedirect"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmDeviceAuthorization"
+              }
+            }
+          }
+        },
+        "description": "Console session of the person confirming `agentd login`, verified by single sign-on, in the browser that began this authorization. Bearer tokens are rejected. The choice is final; a person may choose only themselves, or a Service Account of a Workspace they maintain."
+      }
+    },
+    "/v1/device-authorizations/{id}/reject": {
+      "post": {
+        "operationId": "rejectDeviceAuthorization",
+        "tags": [
+          "Device authorization"
+        ],
+        "responses": {
+          "204": {
+            "description": "Declined"
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "description": "Console session of the person confirming `agentd login`, verified by single sign-on, in the browser that began this authorization. Bearer tokens are rejected."
       }
     },
     "/v1/instance": {
@@ -1218,7 +1568,25 @@
             }
           },
           {
-            "name": "userId",
+            "name": "principalType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "service_account"
+              ]
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdBy",
             "in": "query",
             "schema": {
               "type": "string"
@@ -1408,7 +1776,21 @@
             }
           },
           {
+            "name": "serviceAccountId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "userId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdBy",
             "in": "query",
             "schema": {
               "type": "string"
@@ -1422,54 +1804,6 @@
             }
           }
         ],
-        "description": "Requires an active instance administrator; non-administrators receive 403 before resource lookup."
-      },
-      "post": {
-        "operationId": "createAdminEnrollmentKey",
-        "tags": [
-          "Administration"
-        ],
-        "responses": {
-          "201": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreatedEnrollmentKey"
-                }
-              }
-            },
-            "headers": {
-              "Location": {
-                "description": "Created resource URL",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "API error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateEnrollmentKey"
-              }
-            }
-          }
-        },
         "description": "Requires an active instance administrator; non-administrators receive 403 before resource lookup."
       }
     },
@@ -1556,6 +1890,248 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateEnrollmentKey"
+              }
+            }
+          }
+        },
+        "description": "Requires an active instance administrator; non-administrators receive 403 before resource lookup."
+      }
+    },
+    "/v1/admin/service-accounts": {
+      "get": {
+        "operationId": "listAdminServiceAccounts",
+        "tags": [
+          "Administration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccountsPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^(id|name|createdAt|status)$"
+            },
+            "description": "Allowed sort fields: id, name, createdAt, status. A stable ID tie-breaker is applied."
+          },
+          {
+            "name": "sortOrder",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "revoked"
+              ]
+            }
+          },
+          {
+            "name": "createdBy",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Requires an active instance administrator; non-administrators receive 403 before resource lookup."
+      },
+      "post": {
+        "operationId": "createAdminServiceAccount",
+        "tags": [
+          "Administration"
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Created resource URL",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServiceAccount"
+              }
+            }
+          }
+        },
+        "description": "Requires an active instance administrator; non-administrators receive 403 before resource lookup."
+      }
+    },
+    "/v1/admin/service-accounts/{id}": {
+      "get": {
+        "operationId": "getAdminServiceAccount",
+        "tags": [
+          "Administration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Requires an active instance administrator; non-administrators receive 403 before resource lookup."
+      },
+      "patch": {
+        "operationId": "updateAdminServiceAccount",
+        "tags": [
+          "Administration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateServiceAccount"
               }
             }
           }
@@ -2032,7 +2608,18 @@
             }
           },
           {
-            "name": "userId",
+            "name": "consumerType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "service_account"
+              ]
+            }
+          },
+          {
+            "name": "consumerId",
             "in": "query",
             "schema": {
               "type": "string"
@@ -2597,7 +3184,25 @@
             }
           },
           {
-            "name": "userId",
+            "name": "principalType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "service_account"
+              ]
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdBy",
             "in": "query",
             "schema": {
               "type": "string"
@@ -2894,7 +3499,21 @@
             }
           },
           {
+            "name": "serviceAccountId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "userId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "createdBy",
             "in": "query",
             "schema": {
               "type": "string"
@@ -2908,62 +3527,6 @@
             }
           }
         ]
-      },
-      "post": {
-        "operationId": "createWorkspaceEnrollmentKey",
-        "tags": [
-          "Management"
-        ],
-        "responses": {
-          "201": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreatedEnrollmentKey"
-                }
-              }
-            },
-            "headers": {
-              "Location": {
-                "description": "Created resource URL",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "API error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "workspaceId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateWorkspaceEnrollmentKey"
-              }
-            }
-          }
-        }
       }
     },
     "/v1/workspaces/{workspaceId}/enrollment-keys/{keyId}": {
@@ -3068,6 +3631,341 @@
             }
           }
         }
+      }
+    },
+    "/v1/workspaces/{workspaceId}/service-accounts": {
+      "get": {
+        "operationId": "listWorkspaceServiceAccounts",
+        "tags": [
+          "Management"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccountsPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^(id|name|createdAt|status)$"
+            },
+            "description": "Allowed sort fields: id, name, createdAt, status. A stable ID tie-breaker is applied."
+          },
+          {
+            "name": "sortOrder",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "revoked"
+              ]
+            }
+          },
+          {
+            "name": "createdBy",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Requires maintainer or owner of the Workspace; other members see no Service Accounts."
+      },
+      "post": {
+        "operationId": "createWorkspaceServiceAccount",
+        "tags": [
+          "Management"
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Created resource URL",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkspaceServiceAccount"
+              }
+            }
+          }
+        },
+        "description": "Requires maintainer or owner of the Workspace; other members see no Service Accounts."
+      }
+    },
+    "/v1/workspaces/{workspaceId}/service-accounts/{serviceAccountId}": {
+      "get": {
+        "operationId": "getWorkspaceServiceAccount",
+        "tags": [
+          "Management"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Requires maintainer or owner of the Workspace; other members see no Service Accounts."
+      },
+      "patch": {
+        "operationId": "updateWorkspaceServiceAccount",
+        "tags": [
+          "Management"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateServiceAccount"
+              }
+            }
+          }
+        },
+        "description": "Requires maintainer or owner of the Workspace; other members see no Service Accounts."
+      }
+    },
+    "/v1/workspaces/{workspaceId}/service-accounts/{serviceAccountId}/enrollment-keys": {
+      "post": {
+        "operationId": "createServiceAccountEnrollmentKey",
+        "tags": [
+          "Management"
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedEnrollmentKey"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Created resource URL",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServiceAccountEnrollmentKey"
+              }
+            }
+          }
+        },
+        "description": "Requires maintainer or owner of the Workspace; other members see no Service Accounts. The key registers unattended devices as this Service Account; Location names the key under the Workspace's enrollment-keys."
       }
     },
     "/v1/workspaces/{workspaceId}/grants": {
@@ -3569,7 +4467,18 @@
             }
           },
           {
-            "name": "userId",
+            "name": "consumerType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "service_account"
+              ]
+            }
+          },
+          {
+            "name": "consumerId",
             "in": "query",
             "schema": {
               "type": "string"
@@ -5354,6 +6263,11 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer"
+      },
+      "registrationToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A Device Flow access token for scope agents:enroll and this instance's registration audience, issued to the agentd client."
       }
     },
     "schemas": {
@@ -5503,9 +6417,6 @@
           "workspace": {
             "type": "string"
           },
-          "userId": {
-            "type": "string"
-          },
           "name": {
             "type": "string"
           },
@@ -5544,13 +6455,20 @@
           "revokedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Principal"
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "The person who registered the device; never used for permission checks."
           }
         },
         "required": [
           "id",
           "workspaceId",
           "workspace",
-          "userId",
+          "principal",
           "name",
           "status",
           "roles",
@@ -5569,7 +6487,8 @@
             "type": "string"
           },
           "userId": {
-            "type": "string"
+            "type": "string",
+            "description": "Legacy personal key; new keys always bind a Service Account."
           },
           "roles": {
             "type": "array",
@@ -5594,12 +6513,17 @@
           },
           "revoked": {
             "type": "boolean"
+          },
+          "serviceAccountId": {
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
           }
         },
         "required": [
           "id",
           "workspaceId",
-          "userId",
           "roles",
           "uses",
           "maxUses",
@@ -5631,8 +6555,10 @@
             "enum": [
               "user",
               "workspace",
-              "anonymous"
-            ]
+              "anonymous",
+              "service_account"
+            ],
+            "description": "workspace matches human members only; service_account grants are for egress."
           },
           "subjectId": {
             "type": "string"
@@ -5795,9 +6721,6 @@
           "workspace": {
             "type": "string"
           },
-          "userId": {
-            "type": "string"
-          },
           "agentId": {
             "type": "string"
           },
@@ -5829,6 +6752,14 @@
           "hardDeadline": {
             "type": "string",
             "format": "date-time"
+          },
+          "consumer": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Principal"
+              }
+            ],
+            "description": "The browser User for serve, the ingress Agent's principal for egress; absent for anonymous serve."
           }
         },
         "required": [
@@ -5872,6 +6803,9 @@
               "enabled",
               "loginURL"
             ]
+          },
+          "deviceAuthorization": {
+            "$ref": "#/components/schemas/DeviceAuthorizationInfo"
           }
         },
         "required": [
@@ -5965,6 +6899,9 @@
           },
           "effective": {
             "$ref": "#/components/schemas/EffectiveConfig"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Principal"
           }
         },
         "required": [
@@ -6048,40 +6985,6 @@
         ],
         "additionalProperties": false
       },
-      "CreateEnrollmentKey": {
-        "type": "object",
-        "properties": {
-          "workspaceId": {
-            "type": "string"
-          },
-          "userId": {
-            "type": "string"
-          },
-          "roles": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "ingress",
-                "serve",
-                "egress"
-              ]
-            }
-          },
-          "maxUses": {
-            "type": "integer"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "workspaceId",
-          "roles"
-        ],
-        "additionalProperties": false
-      },
       "CreateGrant": {
         "type": "object",
         "properties": {
@@ -6103,8 +7006,10 @@
             "enum": [
               "user",
               "workspace",
-              "anonymous"
-            ]
+              "anonymous",
+              "service_account"
+            ],
+            "description": "workspace matches human members only; service_account grants are for egress."
           },
           "subjectId": {
             "type": "string"
@@ -6689,36 +7594,6 @@
           "roles"
         ]
       },
-      "CreateWorkspaceEnrollmentKey": {
-        "type": "object",
-        "properties": {
-          "userId": {
-            "type": "string"
-          },
-          "roles": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "ingress",
-                "serve",
-                "egress"
-              ]
-            }
-          },
-          "maxUses": {
-            "type": "integer"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "roles"
-        ],
-        "additionalProperties": false
-      },
       "CreateWorkspaceGrant": {
         "type": "object",
         "properties": {
@@ -6737,8 +7612,10 @@
             "enum": [
               "user",
               "workspace",
-              "anonymous"
-            ]
+              "anonymous",
+              "service_account"
+            ],
+            "description": "workspace matches human members only; service_account grants are for egress."
           },
           "subjectId": {
             "type": "string"
@@ -7169,6 +8046,379 @@
           "priority",
           "enabled"
         ]
+      },
+      "Principal": {
+        "type": "object",
+        "description": "Who an Agent runs as: exactly one User or one Service Account of the Agent's Workspace.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "user",
+              "service_account"
+            ]
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "ServiceAccount": {
+        "type": "object",
+        "description": "A machine principal of one Workspace. Revocation is terminal.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "revoked"
+            ]
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "name",
+          "status",
+          "createdAt"
+        ]
+      },
+      "ServiceAccountsPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceAccount"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        },
+        "required": [
+          "items",
+          "pagination"
+        ],
+        "additionalProperties": false
+      },
+      "CreateServiceAccount": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "workspaceId",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "CreateWorkspaceServiceAccount": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateServiceAccount": {
+        "type": "object",
+        "description": "Send either description or status: revoked. The Workspace and name never change.",
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "const": "revoked"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateServiceAccountEnrollmentKey": {
+        "type": "object",
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "ingress",
+                "serve",
+                "egress"
+              ]
+            }
+          },
+          "maxUses": {
+            "type": "integer"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "roles"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceAuthorizationInfo": {
+        "type": "object",
+        "description": "The instance's OAuth authorization server and public agentd client for `agentd login`.",
+        "properties": {
+          "issuer": {
+            "type": "string"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "audience": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "issuer",
+          "clientId",
+          "scope",
+          "audience"
+        ]
+      },
+      "DeviceAuthorization": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "awaiting_user",
+              "authorized",
+              "consumed",
+              "revoked",
+              "expired"
+            ]
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "actorUserId": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Principal"
+          },
+          "allowedRoles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "ingress",
+                "serve",
+                "egress"
+              ]
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authorizedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "consumedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "agentId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "clientId",
+          "actorUserId",
+          "createdAt",
+          "expiresAt"
+        ]
+      },
+      "DeviceChoice": {
+        "type": "object",
+        "description": "A Workspace the person may register the device in, as themselves (self) or as one of the listed Service Accounts.",
+        "properties": {
+          "workspace": {
+            "$ref": "#/components/schemas/Workspace"
+          },
+          "role": {
+            "type": "string"
+          },
+          "self": {
+            "type": "boolean"
+          },
+          "selfRoles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "ingress",
+                "serve",
+                "egress"
+              ]
+            }
+          },
+          "serviceAccounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceAccount"
+            }
+          }
+        },
+        "required": [
+          "workspace",
+          "self",
+          "serviceAccounts"
+        ]
+      },
+      "DeviceAuthorizationView": {
+        "type": "object",
+        "properties": {
+          "authorization": {
+            "$ref": "#/components/schemas/DeviceAuthorization"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceChoice"
+            }
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "userCode": {
+            "type": "string",
+            "description": "The code typed in this browser, for comparison with the terminal."
+          }
+        },
+        "required": [
+          "authorization",
+          "choices",
+          "user"
+        ]
+      },
+      "ConfirmDeviceAuthorization": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Principal"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "principal"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceRedirect": {
+        "type": "object",
+        "properties": {
+          "redirectTo": {
+            "type": "string",
+            "description": "The authorization server URL the browser continues at."
+          }
+        },
+        "required": [
+          "redirectTo"
+        ]
+      },
+      "AgentEnrollment": {
+        "type": "object",
+        "description": "The Workspace is a hint that must equal the confirmed authorization's Workspace.",
+        "properties": {
+          "instance": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "desired": {
+            "$ref": "#/components/schemas/AgentSpec"
+          }
+        },
+        "required": [
+          "instance",
+          "endpoint",
+          "workspace",
+          "name",
+          "desired"
+        ],
+        "additionalProperties": false
       }
     }
   }

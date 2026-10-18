@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/connection"
 	"github.com/bit-precise/agentd/policygate"
 	"github.com/bit-precise/agentd/stream"
@@ -19,7 +20,7 @@ type flow struct {
 	purpose        connection.Purpose
 	decision       types.Decision
 	provider       *provider
-	userID         string
+	consumer       api.Principal // the browser User for serve, the Agent principal for egress
 	host           string
 	state          string // guarded by Edge.mu
 	started        time.Time
@@ -83,7 +84,7 @@ func (f *flow) closeResources() {
 	close(f.resourcesDone)
 }
 
-func (e *Edge) beginFlow(parent context.Context, d types.Decision, purpose connection.Purpose, userID, host string, source io.Closer, access *provider) (*flow, func(), error) {
+func (e *Edge) beginFlow(parent context.Context, d types.Decision, purpose connection.Purpose, consumer api.Principal, host string, source io.Closer, access *provider) (*flow, func(), error) {
 	if !validDecision(d, purpose) {
 		return nil, nil, ErrDenied
 	}
@@ -121,7 +122,7 @@ func (e *Edge) beginFlow(parent context.Context, d types.Decision, purpose conne
 		lease = minExpiry(lease, hard, claims.LeaseExpiresAt)
 	}
 	ctx, cancel := context.WithDeadline(parent, hard)
-	f := &flow{id: hex.EncodeToString(id[:]), purpose: purpose, decision: d, provider: p, userID: userID, host: host, state: "pending", started: time.Now(), hardDeadline: hard, ctx: ctx, cancel: cancel, resourcesDone: make(chan struct{}), accessStream: accessStream, accessIdentity: access}
+	f := &flow{id: hex.EncodeToString(id[:]), purpose: purpose, decision: d, provider: p, consumer: consumer, host: host, state: "pending", started: time.Now(), hardDeadline: hard, ctx: ctx, cancel: cancel, resourcesDone: make(chan struct{}), accessStream: accessStream, accessIdentity: access}
 	e.flows[f.id] = f
 	e.armLeaseLocked(f, lease)
 	e.wg.Add(1)
@@ -199,7 +200,7 @@ func (e *Edge) workspaceFlowsLocked(workspaceID string) int {
 // revision: a provider's unrelated configuration change keeps this flow.
 func sameDecision(old, next types.Decision, deadline time.Time) bool {
 	return old.ResourceType == next.ResourceType && old.ResourceID == next.ResourceID && old.WorkspaceID == next.WorkspaceID && old.Workspace == next.Workspace &&
-		old.AgentID == next.AgentID && old.ServiceName == next.ServiceName && old.Hostname == next.Hostname && old.UserID == next.UserID &&
+		old.AgentID == next.AgentID && old.ServiceName == next.ServiceName && old.Hostname == next.Hostname && old.Consumer == next.Consumer &&
 		old.Destination == next.Destination && !next.ExpiresAt.Before(deadline)
 }
 
@@ -210,9 +211,9 @@ func (e *Edge) authorizedFlow(f *flow) (types.Decision, bool) {
 	var d types.Decision
 	var err error
 	if f.purpose == connection.PurposeServe {
-		d, err = e.backend.ResolveServe(f.host, f.userID)
+		d, err = e.backend.ResolveServe(f.host, f.consumer.ID)
 	} else {
-		d, err = e.backend.ResolveEgress(f.decision.Workspace, f.userID, f.decision.Destination.Host, int(f.decision.Destination.Port))
+		d, err = e.backend.ResolveEgress(f.decision.Workspace, f.consumer, f.decision.Destination.Host, int(f.decision.Destination.Port))
 	}
 	if err != nil || !validDecision(d, f.purpose) || !e.currentIdentity(f.provider) || (f.accessIdentity != nil && !e.currentIdentity(f.accessIdentity)) {
 		return types.Decision{}, false
@@ -261,12 +262,12 @@ func (e *Edge) openProvider(f *flow) (*connection.Stream, error) {
 
 func (e *Edge) handleAccess(access *provider, incoming *connection.Stream) {
 	claims := incoming.Claims()
-	d, err := e.backend.ResolveEgress(access.identity.Workspace, access.identity.UserID, claims.Destination.Host, int(claims.Destination.Port))
-	if err != nil || d.ResourceID != claims.Resource || d.Destination != claims.Destination || !e.currentIdentity(access) {
+	d, err := e.backend.ResolveEgress(access.identity.Workspace, access.identity.Principal, claims.Destination.Host, int(claims.Destination.Port))
+	if err != nil || d.ResourceID != claims.Resource || d.Destination != claims.Destination || d.Consumer != access.identity.Principal || !e.currentIdentity(access) {
 		return
 	}
 	d.ExpiresAt = minExpiry(d.ExpiresAt, claims.Deadline)
-	f, finish, err := e.beginFlow(incoming.Context(), d, connection.PurposeEgress, access.identity.UserID, "", incoming, access)
+	f, finish, err := e.beginFlow(incoming.Context(), d, connection.PurposeEgress, access.identity.Principal, "", incoming, access)
 	if err != nil {
 		return
 	}

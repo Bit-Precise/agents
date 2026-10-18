@@ -47,6 +47,15 @@ type Watch struct {
 	Revision uint64 `json:"revision"`
 }
 
+// Egress asks Control whether consumer, the ingress Agent's principal, may
+// reach host:port through workspace.
+type Egress struct {
+	Workspace string        `json:"workspace"`
+	Consumer  api.Principal `json:"consumer"`
+	Host      string        `json:"host"`
+	Port      int           `json:"port"`
+}
+
 // Protect does not trust network location, Host, or forwarded headers.
 func Protect(token string, next http.Handler) http.Handler {
 	want := sha256.Sum256([]byte("Bearer " + token))
@@ -131,11 +140,8 @@ func (c *Client) ResolveServe(host, user string) (out types.Decision, err error)
 	err = c.call(context.Background(), "serve", map[string]string{"host": host, "user": user}, &out, 3*time.Second)
 	return
 }
-func (c *Client) ResolveEgress(workspace, user, host string, port int) (out types.Decision, err error) {
-	err = c.call(context.Background(), "egress", struct {
-		Workspace, User, Host string
-		Port                  int
-	}{workspace, user, host, port}, &out, 3*time.Second)
+func (c *Client) ResolveEgress(workspace string, consumer api.Principal, host string, port int) (out types.Decision, err error) {
+	err = c.call(context.Background(), "egress", Egress{workspace, consumer, host, port}, &out, 3*time.Second)
 	return
 }
 func (c *Client) Authorize(ctx context.Context, request Metadata) (out MetadataResult, err error) {

@@ -4,7 +4,7 @@
 
 实体、状态机、级联与版本号的权威说明见 [实体、状态机与关系](model.md)，本文件只描述组件职责、路由和接口。
 
-2026-10-18 起，接入和配置变更已改为权限/策略自动校验，`Approval`、`pendingApproval`、`/approval` 和 `autoApprove` 均已删除（DB v3 迁移）。身份设计中的 Workspace-owned Agent + 唯一 User/ServiceAccount 主体和 Hydra Device Flow 仍未实现：下述 User 绑定、注册密钥和 Token 描述是现状，后续实现遵循 [身份与 Device Flow 设计](identity-and-device-flow.md)。
+2026-10-18 起，接入和配置变更已改为权限/策略自动校验，`Approval`、`pendingApproval`、`/approval` 和 `autoApprove` 均已删除（DB v3 迁移）。2026-10-19 起 Agent 属于 Workspace、运行主体恰为一个 User 或 Service Account，个人设备经 Hydra Device Flow（`agentd login`）注册（DB v4），设计见 [身份与 Device Flow 设计](identity-and-device-flow.md)。
 
 ## 对照 Headscale 的职责分层
 
@@ -27,10 +27,13 @@
 erDiagram
     User ||--o{ Membership : joins
     Workspace ||--o{ Membership : contains
-    User ||--o{ Agent : owns
-    Workspace ||--o{ Agent : scopes
-    Workspace ||--o{ EnrollmentKey : issues
+    Workspace ||--o{ ServiceAccount : contains
+    User ||--o{ Agent : "runs as"
+    ServiceAccount ||--o{ Agent : "runs as"
+    Workspace ||--o{ Agent : owns
+    ServiceAccount ||--o{ EnrollmentKey : "enrolls as"
     EnrollmentKey ||--o{ Agent : enrolls
+    EnrollmentAuthorization |o--o| Agent : "exchanged for"
     Agent ||--o{ Service : publishes
     Agent ||--o{ EgressRoute : provides
     Service ||--o{ Grant : authorizes
@@ -40,11 +43,12 @@ erDiagram
 ```
 
 - User 是实例身份；Membership 是该 User 在某个 Workspace 内的 `owner / maintainer / developer / guest` 角色。
-- Agent 是持久设备 profile，绑定 User 和 Workspace。`Roles` 是注册密钥给出的角色上限；`Desired` 是 agentd 上报的服务端相关配置（不含本地路径、监听和 ingress routes）；`Effective` 是 Control 按 `Desired ∩ 角色上限 ∩ Workspace 内置策略` 自动计算的生效配置。
-- EnrollmentKey 有角色上限、次数、到期和撤销状态。它只用于首次注册，不是业务会话凭据；`UserID` 是设备的运行主体，不是创建者。
+- Service Account 是 Workspace 内的机器主体，不登录 Console；由 maintainer/owner 或 instance admin 管理，撤销为终态。
+- Agent 是持久设备 profile，属于一个 Workspace，主体恰为一个 User 或同 Workspace 的 Service Account，`CreatedBy` 只记录注册操作人。`Roles` 是角色上限（User 设备随 Membership，SA 设备由注册确定）；`Desired` 是 agentd 上报的服务端相关配置（不含本地路径、监听和 ingress routes）；`Effective` 是 Control 按 `Desired ∩ 角色上限 ∩ Workspace 内置策略` 自动计算的生效配置。
+- EnrollmentKey 是无人值守注册凭据，绑定一个 Service Account，有角色上限、次数、到期和撤销状态；迁移保留的旧 User 密钥只兼容到期。EnrollmentAuthorization 是一次 `agentd login` 的确认与一次性兑换记录。两者都只用于首次注册，不是业务会话凭据。
 - Service 固定绑定一个 Agent 和服务名称；源站 URL 由该 Agent 的配置声明。访问主机名为 `<service>.<workspace>.<instance-host>`。
 - EgressRoute 将一个域名/端口/TLS 规则固定绑定到一个 Agent，并有优先级。它不授予用户访问权。
-- Grant 将 Service 或 EgressRoute 授权给 User、Workspace 成员，或仅对 Service 授权给匿名访问者。多条有效 Grant 是并集；撤销其中一条不撤销其他有效授权。
+- Grant 将 Service 或 EgressRoute 授权给 User、Workspace 的人类成员，将 EgressRoute 授权给同 Workspace 的 Service Account，或仅对 Service 授权给匿名访问者。多条有效 Grant 是并集；撤销其中一条不撤销其他有效授权。
 - Token 分为 `user / enrollment / control / access / provider`，用途不可替代。原文仅在创建或注册时交付，SQL 保存哈希。
 - 连接目录与 Flow 是进程运行态，不是数据库中 Agent 的在线字段。进程重启后凭据和策略保留，在线连接由 agentd 重连重建。
 
@@ -63,8 +67,8 @@ sequenceDiagram
     participant D as agentd
     participant C as Control
     participant E as Edge
-    D->>C: POST enroll (key, identity, desired spec)
-    C-->>D: identity + scoped tokens + effective config
+    D->>C: POST /v1/agent-enrollments (Device Flow AT) 或 /api/v1/enroll (SA key), desired spec
+    C-->>D: identity + principal + scoped tokens + effective config
     D->>C: GET credentials
     C-->>D: current effective config (no old token plaintext)
     D->>E: XHTTP GET/POST + role token
@@ -80,11 +84,11 @@ sequenceDiagram
 
 HTTP 承载身份和 Hello 必须使用同一个 TokenID；不能在外层认证为 A、内层声明为 B。Hello 不携带 revision 或服务声明（协议 v3）：每条流都由 Control 的当前决策和 agentd 本地配置按内容授权，因此生效配置变化不需要重建 provider。一个进程的 ConnectorID 在断线重连期间保持不变；同一个 Agent 不接受另一个 Connector 并行抢占。新会话握手完成后才替换同一 Connector 的旧会话，旧连接的退出清理带条件检查，不能删除新连接。
 
-agentd 以指数退避与抖动重连。控制面 401 立即结束运行并提示 `enroll --replace`；Control 不可达时继续使用已同步的生效配置直到其 24 小时有效期结束。正常控制轮询为 2 秒；原文凭据不在每次刷新时重新下发。生效配置变化立即保存，仅有效期滚动时最多每分钟保存一次。
+agentd 以指数退避与抖动重连。控制面 401 立即结束运行并提示重新注册（`login --replace` 或 `enroll --replace`）；Control 不可达时继续使用已同步的生效配置直到其 24 小时有效期结束。正常控制轮询为 2 秒；原文凭据不在每次刷新时重新下发。生效配置变化立即保存，仅有效期滚动时最多每分钟保存一次。
 
 本地 reload 立即应用 serve、egress 和 ingress routes 的收紧，取消受影响的 opening/active Flow，不关闭共享 provider 上的其他业务；扩展在 Control 接受后生效。身份、监听器和承载配置变化需重启，但不会阻止同一次 reload 中的收紧生效。
 
-设备控制凭据有效且距到期不足 7 天时，相关未撤销凭据续至 30 天；TokenID 和哈希保持不变，不会打断会话。用户可更新自己的 Token，管理员也可更新用户 Token；旧 Bearer 立即失效，已兑换的浏览器会话保留原到期。凭据被撤销或过期后用 `agentd enroll --replace` 重新注册：只有 Control 确认旧凭据已失效时才替换。同一 User 可立即回收原名称，其他主体需等待 7 天墓碑期；回收会清除旧记录，不继承其授权和路由。
+设备控制凭据有效且距到期不足 7 天时，相关未撤销凭据续至 30 天；TokenID 和哈希保持不变，不会打断会话。用户可更新自己的 Token，管理员也可更新用户 Token；旧 Bearer 立即失效，已兑换的浏览器会话保留原到期。凭据被撤销或过期后用 `agentd login --replace` 或 `enroll --replace` 重新注册：只有 Control 确认旧凭据已失效时才替换。同一主体可立即回收原名称，其他主体需等待 7 天墓碑期；回收会清除旧记录，不继承其授权和路由。
 
 ## Serve 与 Egress 路由
 
@@ -122,11 +126,15 @@ Egress 路径：
 | Workspace 的 `/agents/{agentId}` | PATCH `{status:"revoked"}` 撤销；不存在批准接口 |
 | Workspace 的 `/servers/{serviceId}`、`/routes/{routeId}` | PATCH `{enabled:boolean}` 更新启用状态；POST `/routes` 仅创建 `kind:"egress"` 的出口路由，服务路由由设备配置产生 |
 | Workspace 的 `/memberships`、`/memberships/{userId}` | GET 列表/详情；PUT `{role}` 幂等设置成员（200）；DELETE 移除（204） |
-| Workspace 的 `/enrollment-keys`、`/grants` | GET 列表与详情；POST 创建（201）；PATCH 单项 `{revoked:true}` 撤销，不能恢复 |
+| Workspace 的 `/service-accounts`、`/service-accounts/{serviceAccountId}` | maintainer+ 的 GET 列表/详情、POST 创建（201）；PATCH `{description}` 或 `{status:"revoked"}`（终态）；其他成员看不到 SA |
+| Workspace 的 `/service-accounts/{serviceAccountId}/enrollment-keys` | POST 为该 SA 创建无人值守注册密钥（201，一次性返回秘密，Location 指向 `/enrollment-keys/{keyId}`）；不接收 User |
+| Workspace 的 `/enrollment-keys`、`/grants` | GET 列表与详情；PATCH 单项 `{revoked:true}` 撤销，不能恢复；POST `/grants` 创建（201，主体可为 `service_account`，仅出口） |
+| `/v1/device-authorizations/{id}`、`/confirm`、`/reject` | Console 的 `agentd login` 确认页：读取可选项、提交 Workspace 与主体或拒绝；仅限发起该授权的浏览器中经 SSO 的本人 Cookie 会话 |
+| `/v1/agent-enrollments` | POST 以 Device Flow access token（Bearer）一次性兑换新 Agent（201）；已兑换返回 409 |
 | Workspace 的 `/connections`、`/flows` | GET 可见在线连接和流；Edge 不可用返回 503，不能将其误认为空列表 |
 | `/v1/admin/audit-events` | GET 仅管理员可见的分页审计记录和详情 |
 
-管理员还具有全局 `ingresses`、`servers`、`egresses`、`routes`、`memberships`、`enrollment-keys`、`grants`、`connections`、`flows` 列表和相应资源操作；每个端点的参数以 OpenAPI 为准。Workspace 子路径的创建请求不接收 `workspaceId`，资源归属由 URL 决定；admin 创建请求显式携带它。PATCH 使用独立输入结构，只接受声明的字段，不开放通用实体修改。
+管理员还具有全局 `ingresses`、`servers`、`egresses`、`routes`、`memberships`、`service-accounts`、`enrollment-keys`、`grants`、`connections`、`flows` 列表和相应资源操作；每个端点的参数以 OpenAPI 为准。Workspace 子路径的创建请求不接收 `workspaceId`，资源归属由 URL 决定；admin 创建请求显式携带它。PATCH 使用独立输入结构，只接受声明的字段，不开放通用实体修改。
 
 Agent 是设备身份，可以同时承担 ingress 和 egress 角色，也可以提供多个 server。角色视图仅嵌入 `AgentSummary {id,name,status,roles}` 与 `effectiveRevision`，不泄露完整 Desired、生效配置或源站地址。Route 明确包含 `kind:serve|egress` 和 `targetType:server|egress`；服务路由引用 Service，出口路由引用指定 Agent，路由 ID 与设备 ID 不能混用。完整配置只由授权的 Agent 详情返回。
 
@@ -134,10 +142,10 @@ Agent 是设备身份，可以同时承担 ingress 和 egress 角色，也可以
 
 旧聚合 `/api/v1/state` 和旧管理动作路径已删除，不再返回 SPA HTML。Console 按当前页面、工作空间和页码调用资源 API，表单候选独立搜索和分页；身份或 Workspace 改变会取消旧请求。管理资源支持 User Bearer 或 Cookie；浏览器 Cookie 写请求同时要求同源 Origin 和内存 CSRF Token。`/v1/sessions/current` 仅表示实际 Cookie 会话，Bearer 身份应读取 `/v1/users/me`。错误保持 `{error:{kind,message}}`：未认证 401、已认证但权限/CSRF 被拒 403、不可见资源 404、状态冲突 409、超大 JSON 413、媒体类型不支持 415、依赖不可用 503。
 
-设备控制协议使用 `POST /api/v1/enroll`、`GET /api/v1/agent/credentials`、`POST /api/v1/agent/config`。取消审批后请求体只包含身份与 desired spec，凭据文档为 v2，承载协议为 v3；agentd 需与服务端同时升级。`/agent` 是独立 XHTTP 入口；`/auth/oidc/login`、`/auth/oidc/callback`、`/auth/authorize` 和服务域 `/__agents/callback` 保持浏览器认证协议，内部 Control/Edge RPC 也不在本次迁移范围。
+设备控制协议使用 `POST /api/v1/enroll`（SA 注册密钥）、`POST /v1/agent-enrollments`（`agentd login`）、`GET /api/v1/agent/credentials`、`POST /api/v1/agent/config`。取消审批后请求体只包含身份与 desired spec，凭据文档为 v2，承载协议为 v3；agentd 需与服务端同时升级。`/agent` 是独立 XHTTP 入口；`/auth/oidc/login`、`/auth/oidc/callback`、`/auth/authorize`、Hydra 使用的 `/oauth/device`、`/oauth/login`、`/oauth/consent`、`/oauth/device/done`、`/oauth/error` 和服务域 `/__agents/callback` 是浏览器导航协议，内部 Control/Edge RPC 也不在本次迁移范围。
 
 ## 已验证与未实现
 
 测试覆盖真实 SQLite/HTTP Control/Edge/Supervisor、CONNECT 与 SOCKS、目标 TLS 原样传递、撤销活跃流、自动校验与拒绝、生效配置变化不重连、v2→v3 迁移、名称回收、重连、租户隔离、Cookie/CSRF/平台令牌边界。PostgreSQL 独立 CI 使用真实数据库验证迁移、重开、事务冲突与外键回滚。浏览器验收包括创建注册密钥、CLI 注册、设备上线及服务 SSO。
 
-OIDC 已支持 discovery、授权码 + PKCE、state/nonce、ID token 验证和 issuer/subject 绑定，并通过 v1→v2 显式迁移持久化身份关联；v2→v3 迁移移除审批模型。当前仍没有 TUN、WSS、多 Edge 路由/迁移、自动秘密轮换或真实 CDN 兼容性验收。SQL 已按行增量写入，但 Control 仍在内存中保存完整快照并只支持单控制进程。生产部署必须为控制域、承载域与服务域准备 DNS 和正确的证书：`*.agents.example.com` 不覆盖 `hello.demo.agents.example.com`，需要覆盖相应 Workspace 服务层级。
+OIDC 已支持 discovery、授权码 + PKCE、state/nonce、ID token 验证和 issuer/subject 绑定，并通过 v1→v2 显式迁移持久化身份关联；v2→v3 迁移移除审批模型，v3→v4 迁移引入 Service Account 与 typed principal。当前仍没有 TUN、WSS、多 Edge 路由/迁移、自动秘密轮换或真实 CDN 兼容性验收。SQL 已按行增量写入，但 Control 仍在内存中保存完整快照并只支持单控制进程。生产部署必须为控制域、承载域与服务域准备 DNS 和正确的证书：`*.agents.example.com` 不覆盖 `hello.demo.agents.example.com`，需要覆盖相应 Workspace 服务层级。

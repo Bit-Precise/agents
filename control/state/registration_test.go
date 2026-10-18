@@ -269,8 +269,8 @@ func TestStartupReconcilesMigratedAgentsWithoutGranting(t *testing.T) {
 	legacy := api.EffectiveConfig{Revision: 37, Services: []api.EffectiveService{{Name: "demo", Origin: "http://127.0.0.1:7070", Hostname: "demo.work.instance.test"}}}
 	snap := types.Snapshot{Revision: 1, Users: []types.User{{ID: "dev", Name: "dev"}, {ID: "gone", Name: "gone"}}, Workspaces: []types.Workspace{{ID: "w", Name: "work"}},
 		Memberships: []types.Membership{{WorkspaceID: "w", UserID: "dev", Role: "developer"}},
-		Agents: []types.Agent{{ID: "a", WorkspaceID: "w", UserID: "dev", Name: "laptop", Status: "pending", Roles: []string{"serve"}, Desired: spec, Effective: legacy},
-			{ID: "b", WorkspaceID: "w", UserID: "gone", Name: "orphan", Status: api.StatusActive, Roles: []string{"ingress"}, Effective: api.EffectiveConfig{Revision: 3}}},
+		Agents: []types.Agent{{ID: "a", WorkspaceID: "w", Principal: api.Principal{Type: api.PrincipalUser, ID: "dev"}, Name: "laptop", Status: "pending", Roles: []string{"serve"}, Desired: spec, Effective: legacy},
+			{ID: "b", WorkspaceID: "w", Principal: api.Principal{Type: api.PrincipalUser, ID: "gone"}, Name: "orphan", Status: api.StatusActive, Roles: []string{"ingress"}, Effective: api.EffectiveConfig{Revision: 3}}},
 		Services: []types.Service{{ID: "s", WorkspaceID: "w", AgentID: "a", Name: "demo", Hostname: "demo.work.instance.test", Enabled: true}}}
 	if err = store.Save(t.Context(), types.Snapshot{}, snap); err != nil {
 		t.Fatal(err)

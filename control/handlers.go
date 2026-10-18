@@ -88,6 +88,7 @@ func (a *App) routes() {
 	m.HandleFunc("POST /api/v1/enroll", a.enroll)
 	m.HandleFunc("GET /api/v1/agent/credentials", a.agentCredentials)
 	m.HandleFunc("POST /api/v1/agent/config", a.agentConfig)
+	a.deviceRoutes()
 	a.registerREST()
 }
 

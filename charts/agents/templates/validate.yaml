@@ -24,3 +24,16 @@
     {{- fail "an exact serviceHost must be service.workspace.instance-domain" -}}
   {{- end -}}
 {{- end -}}
+{{- if .Values.hydra.enabled -}}
+{{- if not .Values.oidc.enabled -}}
+{{- fail "hydra.enabled requires oidc.enabled: devices are registered by people signed in with single sign-on" -}}
+{{- end -}}
+{{- $issuer := required "hydra.publicURL is required when hydra.enabled" .Values.hydra.publicURL -}}
+{{- $parsed := urlParse $issuer -}}
+{{- if or (ne $parsed.scheme "https") (not (has $parsed.path (list "" "/"))) -}}
+{{- fail "hydra.publicURL must be an HTTPS origin without a path" -}}
+{{- end -}}
+{{- if and (eq .Values.hydra.database.type "memory") (gt (int .Values.hydra.replicaCount) 1) -}}
+{{- fail "hydra.database.type memory supports exactly one replica" -}}
+{{- end -}}
+{{- end -}}

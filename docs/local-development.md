@@ -19,9 +19,27 @@ Windows 使用对应 `.exe`。默认控制台为 `http://localhost:8080/console/
 
 `init` 只输出文件位置，不显示 Token、不覆盖已有配置或密钥。只在自己的终端/编辑器中查看 Token 并登录，不把它放进 URL、命令参数、截图或工单。管理员不隐式绕过业务授权。
 
-在控制台创建 `demo` Workspace；创建者自动成为该 Workspace 的 owner。使用其他用户运行设备时，先将其加入成员列表。创建注册密钥，选择该用户及 `ingress/serve/egress`，设定有限期限与一次使用。注册没有人工审批步骤，密钥的角色就是该设备可启用角色的上限。完整密钥仅展示一次，可下载为文件。
+在控制台创建 `demo` Workspace；创建者自动成为该 Workspace 的 owner。设备有两种注册方式，都没有人工审批步骤：
 
-把下载内容保存为 `.run/state/agents/demo.enrollment.key`。该目录由 init 建立为私有目录。Linux/macOS 文件权限设为 0600；Windows 要求仅当前账号、SYSTEM/Administrators 的私有 DACL，不能靠 Unix chmod mode 替代。
+- **个人设备**用 `agentd login`：在浏览器里登录，确认 Workspace，并选择以自己还是以服务账号运行。需要本机 Hydra（下一小节）。
+- **无人值守设备**用服务账号的注册密钥：在“权限与成员 → 服务账号”创建服务账号（例如 `local-runner`），点“注册密钥”，选择 `ingress/serve/egress` 并设定有限期限与一次使用。密钥的角色就是该设备可启用角色的上限，完整密钥仅展示一次，可下载为文件。把它保存为 `.run/state/agents/demo.enrollment.key`。该目录由 init 建立为私有目录。Linux/macOS 文件权限设为 0600；Windows 要求仅当前账号、SYSTEM/Administrators 的私有 DACL，不能靠 Unix chmod mode 替代。
+
+### 本机 Hydra（`agentd login` 需要）
+
+下载 [Ory Hydra v26.2.0](https://github.com/ory/hydra/releases/tag/v26.2.0) 二进制，用示例配置在另一个终端启动。内存存储，重启后进行中的登录失效：
+
+```sh
+SECRETS_SYSTEM="$(openssl rand -hex 32)" hydra serve all --dev --config examples/hydra/local.yaml
+```
+
+在 `.run/agents.yaml` 中加入以下内容后重启 `agents serve`。Control 会自动在 Hydra 注册 `agentd` 公共客户端；没有 OIDC 时，只有 `developmentHTTP` 实例接受用令牌登录的控制台会话来确认设备：
+
+```yaml
+hydra:
+  enabled: true
+  publicURL: http://127.0.0.1:4444
+  adminURL: http://127.0.0.1:4445
+```
 
 ## 2. 注册与运行 Agent
 
@@ -37,20 +55,31 @@ python3 -m http.server 8090 --bind 127.0.0.1 --directory .run/origin
 
 ```sh
 cp ../agentd/examples/agentd/local.yaml .run/agentd.yaml
-chmod 600 .run/state/agents/demo.enrollment.key  # Linux/macOS
 ../agentd/bin/agentd config validate --config .run/agentd.yaml
+```
+
+个人设备执行 `agentd login`。它打开浏览器（`--no-browser` 只打印地址），终端和页面显示同一个验证码；在页面核对验证码、登录控制台、选择 `demo` 和“我自己”后确认，终端随即完成注册：
+
+```sh
+../agentd/bin/agentd login --config .run/agentd.yaml
+```
+
+无人值守设备改用注册密钥：
+
+```sh
+chmod 600 .run/state/agents/demo.enrollment.key  # Linux/macOS
 ../agentd/bin/agentd enroll --config .run/agentd.yaml --key-file .run/state/agents/demo.enrollment.key
 ```
 
-Workspace 必须与注册密钥一致，instance/endpoint 必须与服务端 serverURL/edgeURL 一致。端口变化时两侧一起修改。
+config.yaml 的 Workspace 必须与浏览器中确认的（或密钥所属的）Workspace 一致，instance/endpoint 必须与服务端 serverURL/edgeURL 一致。端口变化时两侧一起修改。在浏览器中拒绝后 Hydra 不会通知终端，按 Ctrl+C 结束等待即可。
 
-Control 自动校验 `local-agent` 声明的 `hello → http://127.0.0.1:8090` 和 `example.com:443` 出口范围：在密钥角色与成员角色允许的范围内即生效，越权、非法配置或名称冲突会让 enroll 直接失败并给出原因。随后运行：
+Control 自动校验 `local-agent` 声明的 `hello → http://127.0.0.1:8090` 和 `example.com:443` 出口范围：在角色上限内即生效（个人设备随你的成员角色，服务账号设备随确认或密钥给出的角色），越权、非法配置或名称冲突会让注册直接失败并给出原因。随后运行：
 
 ```sh
 ../agentd/bin/agentd run --config .run/agentd.yaml
 ```
 
-enroll 保存持久注册 ID、独立控制/访问/提供方 Token 及生效配置到 `.run/state/agentd/credentials.json`。重复注册不会覆盖现有身份；设备被撤销或凭据过期后，用 `agentd enroll --replace` 在 Control 确认旧凭据失效后重新注册。
+login 和 enroll 都把持久注册 ID、运行主体、独立控制/访问/提供方 Token 及生效配置保存到 `.run/state/agentd/credentials.json`；Device Flow 的 access token 只用于一次兑换，不写入磁盘。重复注册不会覆盖现有身份；设备被撤销或凭据过期后，用 `agentd login --replace`（或 `enroll --replace`）在 Control 确认旧凭据失效后重新注册。
 
 ## 3. 验证 Serve
 
@@ -68,7 +97,7 @@ curl --noproxy '*' --resolve hello.demo.localhost:8080:127.0.0.1 http://hello.de
 
 ## 4. 验证指定出口
 
-创建出口路由：Workspace `demo`、Agent `local-agent`、精确域名 `example.com`、端口 443、TLS。再给运行该 profile 的用户或 demo 成员添加有限期出口授权。
+创建出口路由：Workspace `demo`、Agent `local-agent`、精确域名 `example.com`、端口 443、TLS。再给运行该 profile 的主体添加有限期出口授权：个人设备授权给该用户或 demo 成员，服务账号设备授权给该服务账号（Workspace 成员授权不包括服务账号）。
 
 ```sh
 curl --noproxy '' --proxy socks5h://127.0.0.1:1080 https://example.com/
@@ -85,7 +114,7 @@ curl --noproxy '' --proxy http://127.0.0.1:8088 https://example.com/
 - 扩展在 Control 自动校验通过后立即生效，无需任何人批准；被拒时上一份生效配置继续运行。局部收紧/撤销使用独立流取消，生效配置 revision 变化也不会重建共享连接。
 - agentd 约每 2 秒刷新生效配置；凭据被拒（401）立即停止，Control 不可达时继续使用已同步配置至其 24 小时有效期结束。请求本身有超时，这些数值不是生产 SLO。
 - 每条流受授权、策略与会话期限约束；短租约续期重新授权，失败则关闭，还有流/会话硬上限。重连不迁移旧流、不重放业务。最终期限见 [Edge](../edge/README.md) 与 [connection](https://github.com/Bit-Precise/agentd/blob/main/connection/README.md)。
-- Token、注册密钥、授权各自有期限。在线 Agent 的 Token 剩余不足 7 天时可续为 30 天，保持 TokenID/hash，并不替换秘密。离线超过 30 天后用新注册密钥执行 `enroll --replace`；同一用户可沿用原名称，但旧注册不会复活。
+- Token、注册密钥、授权各自有期限。在线 Agent 的 Token 剩余不足 7 天时可续为 30 天，保持 TokenID/hash，并不替换秘密。离线超过 30 天后重新执行 `login --replace` 或用新注册密钥执行 `enroll --replace`；同一主体可沿用原名称，但旧注册不会复活。
 - 控制台用户页可更新本人 Token，管理员也可为其他用户重签。完整新 Token 仅展示一次，旧用户 Bearer 立即失效；已有浏览器会话仍按原到期时间生效。禁用用户与重签 Token 是不同操作。
 - agents 停止会关闭连接目录与活动流；重启恢复 SQL 中注册身份与策略，Agent 重新连接。浏览器内存会话需要重新登录。
 
@@ -109,6 +138,8 @@ CDN 属于信任边界，必须 HTTPS 回源。禁用认证/服务响应缓存�
 go test -mod=readonly -race ./control/servertest ./control/state ./control/db ./edge
 (cd ../agentd && go test -mod=readonly -race ./integration ./connection ./transport/xhttp)
 ```
+
+Device Flow 测试默认使用模拟 Hydra。设置 `AGENTS_TEST_HYDRA_BIN` 指向 Hydra v26.2.0 二进制后，`go test ./control` 和控制台冒烟测试（`npm run test:ui`）会额外针对真实 Hydra 跑完整的登录、确认与兑换链路。
 
 CI 的 PostgreSQL 任务设置 `AGENTS_TEST_POSTGRES_DSN`，运行 `TestPostgresPersistenceAndConstraints`。测试创建独立随机 schema 并清理，不删除公共 schema；测试账号需要 CREATE schema 权限。未提供 DSN 时仅该测试跳过，常规 SQLite 测试仍执行。
 

@@ -9,6 +9,7 @@ import type {
   Membership,
   Pagination,
   Service,
+  ServiceAccount,
   User,
   Workspace,
   IngressView,
@@ -27,6 +28,7 @@ export type ConsoleView = {
   workspaces: Workspace[];
   memberships: Membership[];
   agents: Agent[];
+  serviceAccounts: ServiceAccount[];
   enrollmentKeys: EnrollmentKey[];
   services: Service[];
   egressRoutes: EgressRoute[];
@@ -52,6 +54,7 @@ export function emptyView(user: User, serverURL: string): ConsoleView {
     workspaces: [],
     memberships: [],
     agents: [],
+    serviceAccounts: [],
     enrollmentKeys: [],
     services: [],
     egressRoutes: [],

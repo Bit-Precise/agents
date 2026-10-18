@@ -21,7 +21,7 @@ func TestReloadWithdrawsAndRestoresServiceOnTheSameSession(t *testing.T) {
 	cfg := h.agentConfig(w.Name, "provider")
 	cfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: origin.URL}}}
 	cfg.Egress = config.EgressConfig{Enabled: true, Allow: []policy.Rule{tlsRule("example.com")}}
-	enrolled, _ := h.enroll(cfg, w, u, []string{"serve", "egress"})
+	enrolled, _ := h.login(cfg, w, u)
 	runtime, _ := h.runAgentInstance(cfg, enrolled)
 	await(t, func() bool { return h.connected(enrolled.Agent.ID, "provider") })
 	session := func() string {

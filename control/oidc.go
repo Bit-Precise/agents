@@ -107,7 +107,18 @@ func safeOIDCReturnTo(value string) (string, bool) {
 		return "", false
 	}
 	u, err := url.ParseRequestURI(value)
-	if err != nil || u.IsAbs() || u.Host != "" || u.Fragment != "" || u.RawPath != "" || u.Path != "/auth/authorize" || !strings.HasPrefix(value, "/auth/authorize?") {
+	if err != nil || u.IsAbs() || u.Host != "" || u.Fragment != "" || u.RawPath != "" {
+		return "", false
+	}
+	switch {
+	case u.Path == "/auth/authorize" && strings.HasPrefix(value, "/auth/authorize?"):
+	case u.Path == "/oauth/login" && strings.HasPrefix(value, "/oauth/login?"):
+		// A Device Flow sign-in continues at Hydra's login challenge only.
+		query, err := url.ParseQuery(u.RawQuery)
+		if err != nil || len(query) != 1 || len(query["login_challenge"]) != 1 || !validChallenge(query.Get("login_challenge")) {
+			return "", false
+		}
+	default:
 		return "", false
 	}
 	return u.RequestURI(), true
@@ -242,7 +253,7 @@ func (a *App) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 401, "unauthorized", "identity provider ID token expired")
 		return
 	}
-	if _, err = a.newSession(w, user.ID, "", transaction.Host, expiry); err != nil {
+	if _, err = a.newSession(w, user.ID, "", transaction.Host, true, expiry); err != nil {
 		apiError(w, 429, "capacity", "browser session limit reached")
 		return
 	}

@@ -25,6 +25,16 @@ developmentHTTP: false
 #   bootstrapAdminSubjects: []
 #   adminEmails: [operator@example.com]
 
+# 可选 Hydra，为 `agentd login` 提供 Device Flow；需要同时启用 oidc。
+# publicURL 是 agentd 和浏览器访问的 issuer；adminURL 只允许 Control 访问。
+# hydra:
+#   enabled: true
+#   publicURL: https://auth.agents.example.com
+#   adminURL: http://127.0.0.1:4445
+#   clientId: agentd
+#   # 缺省为 urn:agents:<serverURL 主机名>:agent-enrollment
+#   audience: ""
+
 # PostgreSQL 可替换上述 database；不是多控制节点开关：
 # database:
 #   type: postgres

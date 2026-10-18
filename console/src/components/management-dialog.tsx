@@ -5,7 +5,13 @@ import type { ConsoleView as State } from "@/lib/view";
 import { useEffect, useState, type FormEvent } from "react";
 import { Check, Copy, Download, LoaderCircle } from "lucide-react";
 import * as sdk from "@/api/generated/sdk.gen";
-import type { Agent, CreateGrant, Membership, User } from "@/api/generated";
+import type {
+  Agent,
+  CreateGrant,
+  Membership,
+  ServiceAccount,
+  User,
+} from "@/api/generated";
 import { result, message, requestSignal, APIFailure } from "@/api/session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,12 +27,12 @@ import {
 import { ChoiceSelect, Field, Notice, Tags } from "./controls";
 import {
   agentRoles,
-  canEnroll,
   canGrant,
   canManage,
   canManageResource,
   localTime,
   name,
+  principalName,
   roleNames,
   rows,
   rule,
@@ -44,10 +50,14 @@ export type FormKind =
   | "member"
   | "key"
   | "route"
-  | "grant";
+  | "grant"
+  | "serviceAccount"
+  | "serviceAccountDescription";
 export type FormRequest = {
   kind: FormKind;
   resource?: { id: string; workspaceId: string; type: "service" | "egress" };
+  // The Service Account a key is issued for, or whose description changes.
+  serviceAccount?: ServiceAccount;
 };
 export type ConfirmAction = {
   title: string;
@@ -63,14 +73,19 @@ const titles: Record<FormKind, string> = {
   key: "创建设备注册密钥",
   route: "创建出口路由",
   grant: "添加访问授权",
+  serviceAccount: "创建服务账号",
+  serviceAccountDescription: "编辑服务账号说明",
 };
 const descriptions: Record<FormKind, string> = {
   workspace: "为成员、设备与服务建立独立的管理空间。",
   user: "用户可以加入多个工作空间；新的登录令牌仅在签发后显示一次。",
   member: "成员角色控制管理权限，业务访问仍需要有效资源授权。",
-  key: "注册凭据限定设备可声明的角色，不授予访问他人服务的权限。",
+  key: "注册密钥让无人值守的设备以所选服务账号注册，并限定可声明的角色。个人设备请运行 agentd login。",
   route: "将获准 TLS 域名交给指定出口。创建规则后还需要添加使用授权。",
   grant: "授权只针对所选资源；已有登录状态不会延长其有效期限。",
+  serviceAccount:
+    "服务账号是工作空间内的机器身份，设备以它运行，不随创建者或操作人离开而失效。",
+  serviceAccountDescription: "名称和所属工作空间创建后不可修改。",
 };
 
 export function ManagementDialog({
@@ -96,19 +111,22 @@ export function ManagementDialog({
   const data = rows(state),
     kind = request.kind;
   const permission = (id: string) =>
-    kind === "key"
-      ? canEnroll(state, user, id)
-      : kind === "grant"
-        ? canGrant(state, user, id)
-        : canManage(state, user, id);
+    kind === "grant" ? canGrant(state, user, id) : canManage(state, user, id);
   const workspaces = data.workspaces.filter((w) => permission(w.id));
   const [workspaceID, setWorkspaceID] = useState(
     request.resource?.workspaceId ||
+      request.serviceAccount?.workspaceId ||
       workspace ||
       (workspaces.length === 1 ? workspaces[0].id : ""),
   );
   const [nameValue, setName] = useState(""),
     [userID, setUserID] = useState(""),
+    [serviceAccountID, setServiceAccountID] = useState(
+      request.serviceAccount?.id || "",
+    ),
+    [descriptionValue, setDescription] = useState(
+      request.serviceAccount?.description || "",
+    ),
     [role, setRole] = useState<Membership["role"]>("developer");
   const [roles, setRoles] = useState<Array<"ingress" | "serve" | "egress">>([
     "ingress",
@@ -130,17 +148,6 @@ export function ManagementDialog({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const manager = canManage(state, user, workspaceID);
-  const members = new Set(
-    data.memberships
-      .filter((m) => m.workspaceId === workspaceID)
-      .map((m) => m.userId),
-  );
-  const guest = data.memberships.some(
-    (m) =>
-      m.workspaceId === workspaceID &&
-      m.userId === userID &&
-      m.role === "guest",
-  );
   const eligibleAgents = data.agents.filter(
     (a) =>
       a.workspaceId === workspaceID &&
@@ -167,19 +174,17 @@ export function ManagementDialog({
   ];
   const localSubjects = target.startsWith("egress:") || !manager;
   useEffect(() => {
-    if (kind === "key") setUserID(members.has(user.id) ? user.id : "");
-  }, [workspaceID, kind, user.id]);
-  useEffect(() => {
-    if (guest) setRoles(["ingress"]);
-  }, [guest]);
-  useEffect(() => {
     if (localSubjects && subjectType === "anonymous") setSubjectType("user");
-  }, [localSubjects, subjectType]);
+    // Service Account grants exist only for egress routes.
+    if (resourceKind === "service" && subjectType === "service_account")
+      setSubjectType("user");
+  }, [localSubjects, subjectType, resourceKind]);
   function changeWorkspace(value: string) {
     setWorkspaceID(value);
     setAgentID("");
     setTarget("");
     setSubjectID("");
+    setServiceAccountID("");
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -188,8 +193,49 @@ export function ManagementDialog({
     setError("");
     try {
       let secret: Secret | undefined;
-      if (["key", "member", "route", "grant"].includes(kind) && !workspaceID)
+      if (
+        ["key", "member", "route", "grant", "serviceAccount"].includes(kind) &&
+        !workspaceID
+      )
         throw new Error("请选择工作空间。");
+      if (kind === "serviceAccount") {
+        const body = {
+          name: nameValue.trim(),
+          description: descriptionValue.trim() || undefined,
+        };
+        result(
+          user.admin
+            ? await sdk.createAdminServiceAccount({
+                body: { ...body, workspaceId: workspaceID },
+                signal: requestSignal(),
+              })
+            : await sdk.createWorkspaceServiceAccount({
+                path: { workspaceId: workspaceID },
+                body,
+                signal: requestSignal(),
+              }),
+        );
+      }
+      if (kind === "serviceAccountDescription" && request.serviceAccount) {
+        const target = request.serviceAccount,
+          body = { description: descriptionValue.trim() };
+        result(
+          user.admin
+            ? await sdk.updateAdminServiceAccount({
+                path: { id: target.id },
+                body,
+                signal: requestSignal(),
+              })
+            : await sdk.updateWorkspaceServiceAccount({
+                path: {
+                  workspaceId: target.workspaceId,
+                  serviceAccountId: target.id,
+                },
+                body,
+                signal: requestSignal(),
+              }),
+        );
+      }
       if (kind === "workspace")
         result(
           await sdk.createAdminWorkspace({
@@ -228,34 +274,30 @@ export function ManagementDialog({
         );
       }
       if (kind === "key") {
-        if (!userID || !roles.length)
-          throw new Error("请选择注册用户与至少一种角色。");
+        if (!serviceAccountID || !roles.length)
+          throw new Error("请选择服务账号与至少一种角色。");
         if (new Date(expires) <= new Date())
           throw new Error("失效时间必须晚于当前时间。");
-        const body = {
-          userId: userID,
-          roles,
-          maxUses: Number(uses),
-          expiresAt: new Date(expires).toISOString(),
-        };
         const response = result(
-          user.admin
-            ? await sdk.createAdminEnrollmentKey({
-                body: { ...body, workspaceId: workspaceID },
-                signal: requestSignal(),
-              })
-            : await sdk.createWorkspaceEnrollmentKey({
-                path: { workspaceId: workspaceID },
-                body,
-                signal: requestSignal(),
-              }),
+          await sdk.createServiceAccountEnrollmentKey({
+            path: {
+              workspaceId: workspaceID,
+              serviceAccountId: serviceAccountID,
+            },
+            body: {
+              roles,
+              maxUses: Number(uses),
+              expiresAt: new Date(expires).toISOString(),
+            },
+            signal: requestSignal(),
+          }),
         );
         secret = {
           title: "注册密钥已生成",
           subtitle:
             name(state, "workspaces", workspaceID) +
-            " · " +
-            name(state, "users", userID),
+            " · 服务账号 " +
+            name(state, "serviceAccounts", serviceAccountID),
           token: response.token,
           filename: "agents-enrollment-key.txt",
         };
@@ -353,13 +395,14 @@ export function ManagementDialog({
     </Field>
   );
   useEffect(() => {
-    if (!workspaceID || !["key", "member", "grant", "route"].includes(kind))
+    if (
+      !workspaceID ||
+      !["key", "member", "grant", "route", "serviceAccount"].includes(kind)
+    )
       return;
     const abort = new AbortController();
     setContextLoading(true);
-    const ids = [
-      ...new Set([user.id, ...(kind === "key" && userID ? [userID] : [])]),
-    ];
+    const ids = [user.id];
     void Promise.allSettled(
       ids.map(async (id) => {
         const response = user.admin
@@ -397,10 +440,7 @@ export function ManagementDialog({
       setContextLoading(false);
     });
     return () => abort.abort();
-  }, [workspaceID, userID, kind, user.id, user.admin]);
-  useEffect(() => {
-    if (kind === "key" && !userID && members.has(user.id)) setUserID(user.id);
-  }, [kind, workspaceID, state.memberships, userID, user.id]);
+  }, [workspaceID, kind, user.id, user.admin]);
   return (
     <Dialog
       open
@@ -415,10 +455,23 @@ export function ManagementDialog({
           <DialogDescription>{descriptions[kind]}</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
-          {["workspace", "user"].includes(kind) && (
+          {!["workspace", "user", "serviceAccountDescription"].includes(kind) &&
+            workspaceField}
+          {["workspace", "user", "serviceAccount"].includes(kind) && (
             <Field
-              label={kind === "workspace" ? "工作空间名称" : "用户名称"}
+              label={
+                kind === "workspace"
+                  ? "工作空间名称"
+                  : kind === "user"
+                    ? "用户名称"
+                    : "服务账号名称"
+              }
               id="form-name"
+              hint={
+                kind === "serviceAccount"
+                  ? "小写字母、数字和连字符；创建后不可修改。"
+                  : undefined
+              }
             >
               <Input
                 id="form-name"
@@ -428,21 +481,63 @@ export function ManagementDialog({
                 value={nameValue}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={
-                  kind === "workspace" ? "例如 design-team" : "输入用户名称"
+                  kind === "workspace"
+                    ? "例如 design-team"
+                    : kind === "user"
+                      ? "输入用户名称"
+                      : "例如 ci-runner"
                 }
               />
             </Field>
           )}
-          {!["workspace", "user"].includes(kind) && workspaceField}
-          {["member", "key"].includes(kind) && (
+          {["serviceAccount", "serviceAccountDescription"].includes(kind) && (
+            <Field label="说明（可选）" id="form-description">
+              <Input
+                id="form-description"
+                maxLength={256}
+                value={descriptionValue}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="例如 构建集群的运行节点"
+              />
+            </Field>
+          )}
+          {kind === "key" && (
             <Field
-              label={kind === "key" ? "注册用户" : "用户"}
-              hint={kind === "key" ? "用户需要先加入所选工作空间。" : undefined}
+              label="服务账号"
+              hint="设备以该服务账号运行，不继承创建者的权限或生命周期。"
             >
+              <ResourceSelect
+                resource="serviceAccounts"
+                user={user}
+                workspace={workspaceID}
+                filters={{ status: "active" }}
+                label="服务账号"
+                value={serviceAccountID}
+                valueLabel={
+                  data.serviceAccounts.find((s) => s.id === serviceAccountID)
+                    ?.name
+                }
+                disabled={!workspaceID || !!request.serviceAccount}
+                onSelect={(s) => {
+                  setState((v) => ({
+                    ...v,
+                    serviceAccounts: mergeBy(
+                      v.serviceAccounts,
+                      [s as unknown as ServiceAccount],
+                      (x) => x.id,
+                    ),
+                  }));
+                  setServiceAccountID(s.id);
+                }}
+              />
+            </Field>
+          )}
+          {kind === "member" && (
+            <Field label="用户">
               <ResourceSelect
                 resource="users"
                 user={user}
-                workspace={kind === "key" || !user.admin ? workspaceID : ""}
+                workspace={!user.admin ? workspaceID : ""}
                 filters={{ disabled: false }}
                 label="用户"
                 value={userID}
@@ -460,14 +555,12 @@ export function ManagementDialog({
                   setUserID(u.id);
                 }}
               />
-              {kind === "member" && (
-                <Input
-                  aria-label="已知用户 ID"
-                  placeholder="也可填写已知用户 ID"
-                  value={userID}
-                  onChange={(e) => setUserID(e.target.value)}
-                />
-              )}
+              <Input
+                aria-label="已知用户 ID"
+                placeholder="也可填写已知用户 ID"
+                value={userID}
+                onChange={(e) => setUserID(e.target.value)}
+              />
             </Field>
           )}
           {kind === "member" && (
@@ -490,7 +583,6 @@ export function ManagementDialog({
                     <label className="checkbox-label" key={value}>
                       <Checkbox
                         checked={roles.includes(value)}
-                        disabled={guest && value !== "ingress"}
                         onCheckedChange={(checked) =>
                           setRoles((previous) =>
                             checked
@@ -527,7 +619,8 @@ export function ManagementDialog({
                 </Field>
               </div>
               <p className="field-hint">
-                注册无需人工审批：Control 按注册角色和成员角色自动校验设备声明，通过即生效，越权或冲突直接拒绝。
+                注册无需人工审批：Control
+                按密钥角色自动校验设备声明，通过即生效，越权或冲突直接拒绝。
               </p>
             </>
           )}
@@ -546,7 +639,9 @@ export function ManagementDialog({
                   onSelect={(value) => {
                     const agent = value as unknown as Agent;
                     if (!(agent.effective.egress ?? []).length) {
-                      setError("此设备的生效配置没有出口能力，请选择出口提供方。");
+                      setError(
+                        "此设备的生效配置没有出口能力，请选择出口提供方。",
+                      );
                       return;
                     }
                     setState((s) => ({
@@ -680,6 +775,11 @@ export function ManagementDialog({
                       { value: "user", label: "指定用户" },
                       { value: "workspace", label: "Workspace 成员" },
                       {
+                        value: "service_account",
+                        label: "服务账号（仅出口）",
+                        disabled: resourceKind !== "egress",
+                      },
+                      {
                         value: "anonymous",
                         label: "匿名访问者",
                         disabled: localSubjects,
@@ -692,7 +792,27 @@ export function ManagementDialog({
                     <Input value="任何人，无需登录" readOnly />
                   ) : (
                     <div className="space-y-2">
-                      {subjectType === "workspace" && localSubjects ? (
+                      {subjectType === "service_account" ? (
+                        <ResourceSelect
+                          resource="serviceAccounts"
+                          user={user}
+                          workspace={workspaceID}
+                          filters={{ status: "active" }}
+                          label="服务账号"
+                          value={subjectID}
+                          onSelect={(value) => {
+                            setState((v) => ({
+                              ...v,
+                              serviceAccounts: mergeBy(
+                                v.serviceAccounts,
+                                [value as unknown as ServiceAccount],
+                                (x) => x.id,
+                              ),
+                            }));
+                            setSubjectID(value.id);
+                          }}
+                        />
+                      ) : subjectType === "workspace" && localSubjects ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -721,7 +841,7 @@ export function ManagementDialog({
                           onSelect={(value) => setSubjectID(value.id)}
                         />
                       )}{" "}
-                      {!localSubjects && (
+                      {!localSubjects && subjectType !== "service_account" && (
                         <Input
                           aria-label="已知授权对象 ID"
                           placeholder="也可填写已知对象 ID"
@@ -857,8 +977,14 @@ export function AgentDialog({
           <span className="eyebrow">AGENT CONFIGURATION</span>
           <DialogTitle>Agent 详情</DialogTitle>
           <DialogDescription>
-            {agent.name} · {name(state, "workspaces", agent.workspaceId)} ·{" "}
-            {name(state, "users", agent.userId)}
+            {agent.name} · {name(state, "workspaces", agent.workspaceId)} · 以{" "}
+            {principalName(state, agent.principal)} 运行
+            {agent.createdBy &&
+              !(
+                agent.principal.type === "user" &&
+                agent.principal.id === agent.createdBy
+              ) &&
+              ` · 由 ${name(state, "users", agent.createdBy)} 注册`}
           </DialogDescription>
         </DialogHeader>
         <Tags items={agentRoles(agent)} />
@@ -906,8 +1032,8 @@ export function AgentDialog({
           )}
         </section>
         <p className="text-xs text-muted-foreground">
-          本机访问（ingress）：{effective.ingress ? "已生效" : "未生效"} ·
-          生效 Revision {effective.revision}
+          本机访问（ingress）：{effective.ingress ? "已生效" : "未生效"} · 生效
+          Revision {effective.revision}
           {effective.policy ? ` · 策略 ${effective.policy}` : ""}
         </p>
         <DialogFooter>

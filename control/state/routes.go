@@ -39,7 +39,7 @@ func canManageService(snap *types.Snapshot, actorID string, v *types.Service) er
 	}
 	m := member(snap, v.WorkspaceID, actorID)
 	a := agent(snap, v.AgentID)
-	if !u.Disabled && m != nil && m.Role == "developer" && a != nil && a.UserID == actorID {
+	if !u.Disabled && m != nil && m.Role == "developer" && a != nil && isUser(a.Principal, actorID) {
 		return nil
 	}
 	return problem(types.KindForbidden, "service management is not permitted")
@@ -139,6 +139,16 @@ func (s *State) CreateGrant(actorID string, value types.Grant) (types.Grant, err
 			}
 			value.SubjectID = subject.ID
 			external = subject.ID != w.ID
+		case "service_account":
+			// Only the ingress path authenticates a Service Account consumer; the
+			// browser Serve path has no machine credential to present.
+			if value.ResourceType != "egress" {
+				return problem(types.KindInvalid, "service accounts can only be granted egress routes")
+			}
+			sa := serviceAccount(snap, value.SubjectID)
+			if sa == nil || sa.WorkspaceID != w.ID || sa.Status != api.StatusActive {
+				return problem(types.KindNotFound, "service account not found in this workspace")
+			}
 		default:
 			return problem(types.KindInvalid, "invalid grant subject type")
 		}
@@ -200,7 +210,7 @@ func (s *State) RevokeAgent(actorID, id string) error {
 		if a == nil {
 			return problem(types.KindNotFound, "agent not found")
 		}
-		if a.UserID != actorID {
+		if !isUser(a.Principal, actorID) {
 			if err := requireManager(snap, actorID, a.WorkspaceID); err != nil {
 				return err
 			}
@@ -281,17 +291,25 @@ func (s *State) SetEgressRouteEnabled(actorID, id string, enabled bool) (types.E
 // grantDeadline evaluates the scope of each grant now, not when it was made:
 // an internal user grant only matches while its subject is still a member of
 // the resource Workspace, so leaving cannot turn it into an external share.
-func grantDeadline(snap *types.Snapshot, resourceType, resourceID, userID string, now time.Time) time.Time {
+// User, Service Account and Workspace-member grants never stand in for each
+// other; a Workspace grant covers its human members only.
+func grantDeadline(snap *types.Snapshot, resourceType, resourceID string, consumer api.Principal, now time.Time) time.Time {
 	var until time.Time
-	u := user(snap, userID)
+	u := user(snap, consumer.ID)
+	humanActive := consumer.Type == api.PrincipalUser && u != nil && !u.Disabled
+	sa := serviceAccount(snap, consumer.ID)
+	machineActive := consumer.Type == api.PrincipalServiceAccount && sa != nil && sa.Status == api.StatusActive
 	for _, g := range snap.Grants {
 		if g.ResourceType != resourceType || g.ResourceID != resourceID || g.Revoked || now.Before(g.StartsAt) || !now.Before(g.ExpiresAt) {
 			continue
 		}
 		match := g.SubjectType == "anonymous" && resourceType == "service"
-		if u != nil && !u.Disabled {
-			userMatch := g.SubjectType == "user" && g.SubjectID == userID && (g.External || member(snap, g.WorkspaceID, userID) != nil)
-			match = match || userMatch || g.SubjectType == "workspace" && member(snap, g.SubjectID, userID) != nil
+		if humanActive {
+			userMatch := g.SubjectType == "user" && g.SubjectID == consumer.ID && (g.External || member(snap, g.WorkspaceID, consumer.ID) != nil)
+			match = match || userMatch || g.SubjectType == "workspace" && member(snap, g.SubjectID, consumer.ID) != nil
+		}
+		if machineActive {
+			match = match || g.SubjectType == "service_account" && g.SubjectID == consumer.ID && sa.WorkspaceID == g.WorkspaceID
 		}
 		if match && g.ExpiresAt.After(until) {
 			until = g.ExpiresAt
@@ -351,7 +369,11 @@ func (s *State) ResolveServe(host, userID string) (types.Decision, error) {
 	if !found.Enabled {
 		return types.Decision{}, problem(types.KindUnavailable, "service disabled")
 	}
-	until := grantDeadline(snap, "service", found.ID, userID, time.Now())
+	consumer := api.Principal{}
+	if userID != "" {
+		consumer = userPrincipal(userID)
+	}
+	until := grantDeadline(snap, "service", found.ID, consumer, time.Now())
 	if until.IsZero() {
 		return types.Decision{}, problem(types.KindForbidden, "service access is not granted")
 	}
@@ -362,10 +384,12 @@ func (s *State) ResolveServe(host, userID string) (types.Decision, error) {
 	if _, ok := a.Effective.Service(found.Name); !ok {
 		return types.Decision{}, problem(types.KindUnavailable, "service is not in the provider's effective configuration")
 	}
-	return types.Decision{ResourceType: "service", ResourceID: found.ID, WorkspaceID: found.WorkspaceID, Workspace: workspace(snap, found.WorkspaceID).Name, AgentID: a.ID, ServiceName: found.Name, Hostname: domain, UserID: userID, Revision: a.Effective.Revision, ExpiresAt: cappedDeadline(until)}, nil
+	return types.Decision{ResourceType: "service", ResourceID: found.ID, WorkspaceID: found.WorkspaceID, Workspace: workspace(snap, found.WorkspaceID).Name, AgentID: a.ID, ServiceName: found.Name, Hostname: domain, Consumer: consumer, Revision: a.Effective.Revision, ExpiresAt: cappedDeadline(until)}, nil
 }
 
-func (s *State) ResolveEgress(workspaceSlug, userID, host string, port int) (types.Decision, error) {
+// ResolveEgress decides for the ingress Agent's principal: a User must still be
+// a member of the Workspace, a Service Account must belong to it.
+func (s *State) ResolveEgress(workspaceSlug string, consumer api.Principal, host string, port int) (types.Decision, error) {
 	domain, err := policy.CanonicalDomain(host)
 	if err != nil || port < 1 || port > 65535 {
 		return types.Decision{}, problem(types.KindInvalid, "invalid egress destination")
@@ -373,15 +397,17 @@ func (s *State) ResolveEgress(workspaceSlug, userID, host string, port int) (typ
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	snap := &s.snapshot
-	if _, err := requireUser(snap, userID); err != nil {
-		return types.Decision{}, err
+	if consumer.Type == api.PrincipalUser {
+		if _, err := requireUser(snap, consumer.ID); err != nil {
+			return types.Decision{}, err
+		}
 	}
 	w := workspace(snap, workspaceSlug)
 	if w == nil {
 		return types.Decision{}, problem(types.KindNotFound, "workspace not found")
 	}
-	if member(snap, w.ID, userID) == nil {
-		return types.Decision{}, problem(types.KindForbidden, "egress requires current workspace membership")
+	if !principalActive(snap, w.ID, consumer) {
+		return types.Decision{}, problem(types.KindForbidden, "egress requires a current member or a service account of this workspace")
 	}
 	var candidates []types.EgressRoute
 	for _, r := range snap.EgressRoutes {
@@ -408,7 +434,7 @@ func (s *State) ResolveEgress(workspaceSlug, userID, host string, port int) (typ
 		return len(b.Rule.Domain.Suffix) - len(a.Rule.Domain.Suffix)
 	})
 	r := candidates[0]
-	until := grantDeadline(snap, "egress", r.ID, userID, time.Now())
+	until := grantDeadline(snap, "egress", r.ID, consumer, time.Now())
 	if until.IsZero() {
 		return types.Decision{}, problem(types.KindForbidden, "selected egress route is not granted")
 	}
@@ -419,5 +445,5 @@ func (s *State) ResolveEgress(workspaceSlug, userID, host string, port int) (typ
 	if !policy.Allowed(a.Effective.Egress, a.Effective.Deny, domain, port, "tls") {
 		return types.Decision{}, problem(types.KindForbidden, "exit agent does not permit this destination")
 	}
-	return types.Decision{ResourceType: "egress", ResourceID: r.ID, WorkspaceID: w.ID, Workspace: w.Name, AgentID: a.ID, UserID: userID, Destination: connection.Destination{Host: domain, Port: uint16(port)}, Revision: a.Effective.Revision, ExpiresAt: cappedDeadline(until)}, nil
+	return types.Decision{ResourceType: "egress", ResourceID: r.ID, WorkspaceID: w.ID, Workspace: w.Name, AgentID: a.ID, Consumer: consumer, Destination: connection.Destination{Host: domain, Port: uint16(port)}, Revision: a.Effective.Revision, ExpiresAt: cappedDeadline(until)}, nil
 }

@@ -1,5 +1,5 @@
-github.com/bit-precise/agentd v0.0.0-20261018003205-43982e760648 h1:6gXpIuDyzo+4QGOwOhlEMo/+SkjjJ+rj16FCKDxtt+U=
-github.com/bit-precise/agentd v0.0.0-20261018003205-43982e760648/go.mod h1:uoosr88gNCaf8+kev0CY3P1UtNmdHtdBFGdtzxDB7/Q=
+github.com/bit-precise/agentd v0.0.0-20261018164128-c287700c633a h1:qcUOmhxnDH2p19aHqiURxitvE94+EsyBXLxxEjcbJHs=
+github.com/bit-precise/agentd v0.0.0-20261018164128-c287700c633a/go.mod h1:uoosr88gNCaf8+kev0CY3P1UtNmdHtdBFGdtzxDB7/Q=
 github.com/coreos/go-oidc/v3 v3.21.0 h1:wZo4Q9Pum8dYEj0eMUPrqR+kvuGkeUplbLpNCkBqoWM=
 github.com/coreos/go-oidc/v3 v3.21.0/go.mod h1:DYCf24+ncYi+XkIH97GY1+dqoRlbaSI26KVTCI9SrY4=
 github.com/coreos/go-systemd/v22 v22.5.0/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=

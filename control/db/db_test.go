@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agents/control/types"
 )
 
@@ -83,7 +84,7 @@ func TestVersionOneMigrationPreservesUsersTokensAndRevision(t *testing.T) {
 		t.Fatalf("migration altered v1 data: %+v", loaded)
 	}
 	var version int
-	if err := store.sql.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 3 {
+	if err := store.sql.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 4 {
 		t.Fatalf("migration version %d: %v", version, err)
 	}
 	previous := loaded
@@ -116,7 +117,7 @@ func TestSaveRevisionConflictAndTransactionRollback(t *testing.T) {
 	if err = store.Save(t.Context(), types.Snapshot{}, first); err != nil {
 		t.Fatal(err)
 	}
-	bad := types.Snapshot{Revision: 2, Users: []types.User{{ID: "u2", Name: "bad"}}, Agents: []types.Agent{{ID: "a", WorkspaceID: "nonexistent", UserID: "u2", Name: "invalid"}}}
+	bad := types.Snapshot{Revision: 2, Users: []types.User{{ID: "u2", Name: "bad"}}, Agents: []types.Agent{{ID: "a", WorkspaceID: "nonexistent", Principal: api.Principal{Type: api.PrincipalUser, ID: "u2"}, Name: "invalid"}}}
 	if err = store.Save(t.Context(), first, bad); err == nil {
 		t.Fatal("invalid snapshot committed")
 	}
@@ -196,6 +197,61 @@ func TestApprovalRemovalMigrationKeepsTraceAndGrantScope(t *testing.T) {
 	if external["by-dev"] || !external["by-owner"] || external["member"] {
 		t.Fatalf("grant scope migrated incorrectly: %v", external)
 	}
+	if a.Principal != (api.Principal{Type: api.PrincipalUser, ID: "dev"}) || len(snap.EnrollmentKeys) != 1 || snap.EnrollmentKeys[0].UserID != "dev" || snap.EnrollmentKeys[0].ServiceAccountID != "" {
+		t.Fatalf("legacy owners did not become user principals: %+v %+v", a.Principal, snap.EnrollmentKeys)
+	}
+	var version int
+	var userID string
+	var serviceAccountID sql.NullString
+	if err = store.sql.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 4 {
+		t.Fatalf("schema version %d, %v", version, err)
+	}
+	if err = store.sql.QueryRow("SELECT user_id, service_account_id FROM agents WHERE id='a'").Scan(&userID, &serviceAccountID); err != nil || userID != "dev" || serviceAccountID.Valid {
+		t.Fatalf("agent principal columns: %q %v %v", userID, serviceAccountID, err)
+	}
+}
+
+func TestPrincipalColumnsAreExclusiveAndWorkspaceBound(t *testing.T) {
+	store, err := Open(t.Context(), Options{DSN: filepath.Join(t.TempDir(), "db.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	sa := api.Principal{Type: api.PrincipalServiceAccount, ID: "sa"}
+	base := types.Snapshot{Revision: 1, Users: []types.User{{ID: "u", Name: "u"}}, Workspaces: []types.Workspace{{ID: "w1", Name: "one"}, {ID: "w2", Name: "two"}},
+		ServiceAccounts: []types.ServiceAccount{{ID: "sa", WorkspaceID: "w1", Name: "robot", Status: api.StatusActive, CreatedBy: "u"}}}
+	if err = store.Save(t.Context(), types.Snapshot{}, base); err != nil {
+		t.Fatal(err)
+	}
+	next := base
+	next.Revision = 2
+	next.Agents = []types.Agent{{ID: "a", WorkspaceID: "w1", Principal: sa, CreatedBy: "u", Name: "runner", Status: api.StatusActive}}
+	next.Tokens = []types.Token{{ID: "t", Hash: "h", Kind: "provider", ServiceAccountID: "sa", WorkspaceID: "w1", AgentID: "a"}}
+	next.EnrollmentKeys = []types.EnrollmentKey{{ID: "k", WorkspaceID: "w1", ServiceAccountID: "sa", CreatedBy: "u", Roles: []string{"serve"}, MaxUses: 1}}
+	next.EnrollmentAuthorizations = []types.EnrollmentAuthorization{{ID: "auth", Status: "consumed", ActorUserID: "u", WorkspaceID: "w1", Principal: sa, AgentID: "a"}}
+	if err = store.Save(t.Context(), base, next); err != nil {
+		t.Fatal(err)
+	}
+	cross := next
+	cross.Revision = 3
+	cross.Agents = append([]types.Agent{{ID: "b", WorkspaceID: "w2", Principal: sa, Name: "elsewhere", Status: api.StatusActive}}, next.Agents...)
+	if err = store.Save(t.Context(), next, cross); err == nil {
+		t.Fatal("an agent ran as a service account of another workspace")
+	}
+	if _, err = store.sql.Exec("INSERT INTO agents(id,workspace_id,user_id,service_account_id,name,payload) VALUES('c','w1','u','sa','both','{}')"); err == nil {
+		t.Fatal("an agent had two principals")
+	}
+	if _, err = store.sql.Exec("INSERT INTO agents(id,workspace_id,name,payload) VALUES('d','w1','none','{}')"); err == nil {
+		t.Fatal("an agent had no principal")
+	}
+	loaded, err := store.Load(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Revision != 2 || len(loaded.Agents) != 1 || loaded.Agents[0].Principal != sa || loaded.Agents[0].CreatedBy != "u" || loaded.Tokens[0].ServiceAccountID != "sa" ||
+		loaded.EnrollmentKeys[0].ServiceAccountID != "sa" || len(loaded.ServiceAccounts) != 1 || len(loaded.EnrollmentAuthorizations) != 1 || loaded.EnrollmentAuthorizations[0].Principal != sa {
+		t.Fatalf("service account state did not round-trip: %+v", loaded)
+	}
 }
 
 func TestIncrementalSaveRoundTripsChangedRowsOnly(t *testing.T) {
@@ -206,7 +262,7 @@ func TestIncrementalSaveRoundTripsChangedRowsOnly(t *testing.T) {
 	defer store.Close()
 	first := types.Snapshot{Revision: 1, Users: []types.User{{ID: "u", Name: "alice"}}, Workspaces: []types.Workspace{{ID: "w", Name: "work"}},
 		Memberships: []types.Membership{{WorkspaceID: "w", UserID: "u", Role: "developer"}},
-		Agents:      []types.Agent{{ID: "old", WorkspaceID: "w", UserID: "u", Name: "laptop", Status: "revoked"}},
+		Agents:      []types.Agent{{ID: "old", WorkspaceID: "w", Principal: api.Principal{Type: api.PrincipalUser, ID: "u"}, Name: "laptop", Status: "revoked"}},
 		Tokens:      []types.Token{{ID: "t", Hash: "h", Kind: "provider", UserID: "u", WorkspaceID: "w", AgentID: "old"}},
 		Audit:       []types.Audit{{ID: "a1", Action: "one"}}}
 	if err = store.Save(t.Context(), types.Snapshot{}, first); err != nil {
@@ -217,7 +273,7 @@ func TestIncrementalSaveRoundTripsChangedRowsOnly(t *testing.T) {
 	second := first
 	second.Revision = 2
 	second.Memberships = []types.Membership{{WorkspaceID: "w", UserID: "u", Role: "maintainer"}}
-	second.Agents = []types.Agent{{ID: "new", WorkspaceID: "w", UserID: "u", Name: "laptop", Status: "active"}}
+	second.Agents = []types.Agent{{ID: "new", WorkspaceID: "w", Principal: api.Principal{Type: api.PrincipalUser, ID: "u"}, Name: "laptop", Status: "active"}}
 	second.Tokens = nil
 	second.Audit = append(append([]types.Audit(nil), first.Audit...), types.Audit{ID: "a2", Action: "two"})
 	if err = store.Save(t.Context(), first, second); err != nil {

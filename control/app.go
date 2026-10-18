@@ -36,6 +36,7 @@ type App struct {
 	consoleTransport *http.Transport
 	separate         bool
 	oidc             *oidcAuth
+	device           *deviceFlow
 }
 
 func New(ctx context.Context, cfg Config, adminToken string) (*App, error) {
@@ -89,7 +90,12 @@ func newApp(ctx context.Context, cfg Config, adminToken, internalToken string, s
 		s.Close()
 		return nil, err
 	}
-	a := &App{Config: cfg, State: s, auth: newBrowserAuth(), router: http.NewServeMux(), assets: assets.Handler(), separate: separate, oidc: oidcAuth}
+	device, err := newDeviceFlow(cfg)
+	if err != nil {
+		s.Close()
+		return nil, err
+	}
+	a := &App{Config: cfg, State: s, auth: newBrowserAuth(), router: http.NewServeMux(), assets: assets.Handler(), separate: separate, oidc: oidcAuth, device: device}
 	if separate {
 		status, err := controlrpc.NewClient(cfg.EdgeInternalURL, internalToken)
 		if err != nil {
@@ -127,6 +133,10 @@ func newApp(ctx context.Context, cfg Config, adminToken, internalToken string, s
 		a.wg.Add(1)
 		go func() { defer a.wg.Done(); _ = a.Edge.Run(runtimeCtx) }()
 	}
+	if a.device != nil {
+		a.wg.Add(1)
+		go func() { defer a.wg.Done(); a.device.reconcile(runtimeCtx) }()
+	}
 	cleanupOIDC = false
 	return a, nil
 }
@@ -148,6 +158,9 @@ func (a *App) Close() error {
 		}
 		if a.oidc != nil {
 			a.oidc.http.CloseIdleConnections()
+		}
+		if a.device != nil {
+			a.device.hydra.CloseIdleConnections()
 		}
 		a.closeErr = a.State.Close()
 	})
@@ -185,7 +198,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 			serverapi.Handler().ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/auth/") {
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/auth/") || strings.HasPrefix(r.URL.Path, "/oauth/") {
 			a.router.ServeHTTP(w, r)
 			return
 		}

@@ -20,8 +20,10 @@ import (
 type Backend interface {
 	Identity(token string) (types.Identity, error)
 	Agent(agentID string) (api.Agent, error)
+	// ResolveServe authorizes a browser request; userID is empty for anonymous.
 	ResolveServe(host, userID string) (types.Decision, error)
-	ResolveEgress(workspace, userID, host string, port int) (types.Decision, error)
+	// ResolveEgress authorizes the Agent's principal, a User or a Service Account.
+	ResolveEgress(workspace string, consumer api.Principal, host string, port int) (types.Decision, error)
 	Subscribe() (<-chan struct{}, func())
 }
 
@@ -265,7 +267,7 @@ type FlowStatus struct {
 	ResourceID   string                 `json:"resourceId"`
 	WorkspaceID  string                 `json:"workspaceId"`
 	Workspace    string                 `json:"workspace"`
-	UserID       string                 `json:"userId,omitempty"`
+	Consumer     *api.Principal         `json:"consumer,omitempty"`
 	AgentID      string                 `json:"agentId"`
 	State        string                 `json:"state"`
 	Deadline     time.Time              `json:"deadline"`
@@ -293,8 +295,12 @@ func (e *Edge) Snapshot() Snapshot {
 			SessionID: v.SessionID, Generation: v.Generation, Revision: p.revision, Services: services, EgressEnabled: p.egress, ConnectedAt: p.created, ExpiresAt: v.ExpiresAt})
 	}
 	for _, f := range e.flows {
+		var consumer *api.Principal
+		if f.consumer.Valid() {
+			consumer = &api.Principal{Type: f.consumer.Type, ID: f.consumer.ID}
+		}
 		out.Flows = append(out.Flows, FlowStatus{ID: f.id, Purpose: string(f.purpose), ResourceID: f.decision.ResourceID,
-			WorkspaceID: f.decision.WorkspaceID, Workspace: f.decision.Workspace, UserID: f.userID, AgentID: f.decision.AgentID, State: f.state, Deadline: f.deadline,
+			WorkspaceID: f.decision.WorkspaceID, Workspace: f.decision.Workspace, Consumer: consumer, AgentID: f.decision.AgentID, State: f.state, Deadline: f.deadline,
 			Destination: f.decision.Destination, StartedAt: f.started, ExpiresAt: f.deadline, HardDeadline: f.hardDeadline})
 	}
 	sort.Slice(out.Connections, func(i, j int) bool { return out.Connections[i].SessionID < out.Connections[j].SessionID })

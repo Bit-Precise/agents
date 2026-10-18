@@ -5,6 +5,7 @@ import { emptyView, type ConsoleView } from "./view";
 
 export type Resource =
   | "agents"
+  | "serviceAccounts"
   | "ingresses"
   | "servers"
   | "egresses"
@@ -76,6 +77,12 @@ export async function queryResource(
         user.admin
           ? await sdk.listAdminGrants(a)
           : await sdk.listWorkspaceGrants(w),
+      );
+    case "serviceAccounts":
+      return result(
+        user.admin
+          ? await sdk.listAdminServiceAccounts(a)
+          : await sdk.listWorkspaceServiceAccounts(w),
       );
     case "enrollmentKeys":
       return result(
@@ -256,9 +263,11 @@ export async function loadView(
   // Bounded references for the rows on this page, fetched by authorized resource detail.
   const workspaceIDs = new Set<string>(),
     userRefs = new Map<string, string>(),
-    agentRefs = new Map<string, string>();
+    agentRefs = new Map<string, string>(),
+    serviceAccountRefs = new Map<string, string>();
   for (const x of [
     ...view.agents,
+    ...view.serviceAccounts,
     ...view.enrollmentKeys,
     ...view.memberships,
     ...view.grants,
@@ -268,12 +277,23 @@ export async function loadView(
   ]) {
     workspaceIDs.add(x.workspaceId);
     if ("userId" in x && x.userId) userRefs.set(x.userId, x.workspaceId);
+    if ("createdBy" in x && x.createdBy)
+      userRefs.set(x.createdBy, x.workspaceId);
     if ("agentId" in x && x.agentId) agentRefs.set(x.agentId, x.workspaceId);
+    if ("serviceAccountId" in x && x.serviceAccountId)
+      serviceAccountRefs.set(x.serviceAccountId, x.workspaceId);
+    const p =
+      "principal" in x ? x.principal : "consumer" in x ? x.consumer : undefined;
+    if (p?.type === "user") userRefs.set(p.id, x.workspaceId);
+    if (p?.type === "service_account")
+      serviceAccountRefs.set(p.id, x.workspaceId);
   }
   for (const x of view.agents) agentRefs.set(x.id, x.workspaceId);
   for (const g of view.grants) {
     if (g.subjectType === "user" && g.subjectId)
       userRefs.set(g.subjectId, g.workspaceId);
+    if (g.subjectType === "service_account" && g.subjectId)
+      serviceAccountRefs.set(g.subjectId, g.workspaceId);
     if (g.subjectType === "workspace" && g.subjectId)
       workspaceIDs.add(g.subjectId);
   }
@@ -306,6 +326,23 @@ export async function loadView(
               }),
         );
         view.users.push(u);
+      })(),
+    );
+  }
+  // Only managers can read Service Accounts; others keep showing the ID.
+  for (const [id, wid] of serviceAccountRefs) {
+    if (view.serviceAccounts.some((s) => s.id === id)) continue;
+    refs.push(
+      (async () => {
+        const s = result(
+          user.admin
+            ? await sdk.getAdminServiceAccount({ path: { id }, signal })
+            : await sdk.getWorkspaceServiceAccount({
+                path: { workspaceId: wid, serviceAccountId: id },
+                signal,
+              }),
+        );
+        view.serviceAccounts.push(s);
       })(),
     );
   }

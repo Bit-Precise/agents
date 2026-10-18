@@ -1,0 +1,18 @@
+# 本机联调用的 Ory Hydra v26.2.0：内存存储，配合 `hydra serve all --dev` 使用 HTTP issuer。
+# 系统密钥不写在文件里，启动时用 SECRETS_SYSTEM 环境变量传入（见 docs/local-development.md）。
+dsn: memory
+serve:
+  public: {host: 127.0.0.1, port: 4444}
+  admin: {host: 127.0.0.1, port: 4445}
+urls:
+  self:
+    issuer: http://127.0.0.1:4444
+  # Control 的 Hydra 页面；端口随 agents serverURL 一起修改。
+  login: http://localhost:8080/oauth/login
+  consent: http://localhost:8080/oauth/consent
+  error: http://localhost:8080/oauth/error
+  device:
+    verification: http://localhost:8080/oauth/device
+    success: http://localhost:8080/oauth/device/done
+strategies:
+  access_token: opaque

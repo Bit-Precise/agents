@@ -39,7 +39,19 @@ func (e *Edge) authorizeHTTP(r *http.Request) (string, error) {
 }
 
 func validIdentity(id types.Identity) bool {
-	return (id.Kind == "provider" || id.Kind == "access") && id.TokenID != "" && id.AgentID != "" && id.WorkspaceID != "" && id.Workspace != "" && id.ExpiresAt.After(time.Now()) && (id.Kind != "access" || id.UserID != "")
+	return (id.Kind == "provider" || id.Kind == "access") && id.TokenID != "" && id.AgentID != "" && id.WorkspaceID != "" && id.Workspace != "" && id.ExpiresAt.After(time.Now()) && validOwner(id)
+}
+
+// validOwner requires the typed principal and the user field to agree: a User
+// device carries that User, a Service Account device carries no User at all.
+func validOwner(id types.Identity) bool {
+	switch id.Principal.Type {
+	case api.PrincipalUser:
+		return id.Principal.Valid() && id.UserID == id.Principal.ID
+	case api.PrincipalServiceAccount:
+		return id.Principal.Valid() && id.UserID == ""
+	}
+	return false
 }
 
 func minExpiry(values ...time.Time) time.Time {
@@ -101,7 +113,7 @@ func (e *Edge) authenticate(p *provider, hello connection.Hello) (connection.Pri
 	p.generation = e.generation[key]
 	e.mu.Unlock()
 	e.observe(p, agent)
-	return connection.Principal{Role: hello.Role, Workspace: id.Workspace, AgentID: id.AgentID, UserID: id.UserID, ConnectorID: hello.ConnectorID,
+	return connection.Principal{Role: hello.Role, Workspace: id.Workspace, AgentID: id.AgentID, PrincipalType: id.Principal.Type, PrincipalID: id.Principal.ID, ConnectorID: hello.ConnectorID,
 		Generation: p.generation, ExpiresAt: expires}, nil
 }
 
@@ -159,7 +171,7 @@ func (e *Edge) accept(p *provider) {
 
 func (e *Edge) currentIdentity(p *provider) bool {
 	id, err := e.backend.Identity(p.token)
-	if err != nil || !validIdentity(id) || id.TokenID != p.identity.TokenID || id.Kind != p.identity.Kind || id.AgentID != p.identity.AgentID || id.UserID != p.identity.UserID || id.WorkspaceID != p.identity.WorkspaceID || id.Workspace != p.identity.Workspace {
+	if err != nil || !validIdentity(id) || id.TokenID != p.identity.TokenID || id.Kind != p.identity.Kind || id.AgentID != p.identity.AgentID || id.UserID != p.identity.UserID || id.Principal != p.identity.Principal || id.WorkspaceID != p.identity.WorkspaceID || id.Workspace != p.identity.Workspace {
 		return false
 	}
 	agent, err := e.backend.Agent(id.AgentID)
@@ -180,8 +192,12 @@ func (e *Edge) authorizeCandidate(ctx context.Context, p *provider, principal co
 	if err != nil || host != r.Destination.Host || r.Destination.Port == 0 {
 		return connection.OpenClaims{}, ErrDenied
 	}
-	d, err := e.backend.ResolveEgress(principal.Workspace, principal.UserID, host, int(r.Destination.Port))
-	if err != nil || !validDecision(d, connection.PurposeEgress) || d.WorkspaceID != p.identity.WorkspaceID || d.UserID != principal.UserID || d.Destination != r.Destination {
+	consumer := api.Principal{Type: principal.PrincipalType, ID: principal.PrincipalID}
+	if consumer != p.identity.Principal {
+		return connection.OpenClaims{}, ErrDenied
+	}
+	d, err := e.backend.ResolveEgress(principal.Workspace, consumer, host, int(r.Destination.Port))
+	if err != nil || !validDecision(d, connection.PurposeEgress) || d.WorkspaceID != p.identity.WorkspaceID || d.Consumer != consumer || d.Destination != r.Destination {
 		return connection.OpenClaims{}, ErrDenied
 	}
 	deadline := minExpiry(r.Deadline, principal.ExpiresAt, time.Now().Add(e.cfg.MaxFlowLifetime))

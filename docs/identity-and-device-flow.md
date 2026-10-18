@@ -1,10 +1,10 @@
 # Workspace、运行主体与 OAuth Device Flow
 
-状态：2026-10-18 确认的目标设计，待实现。实现基线为 agents `f695037`、agentd `6bc1113`。当前版本尚无 Service Account、agents 专用 Hydra 或 `agentd login` Device Flow；现有 OpenAPI、配置 Schema 和运行手册仍描述已交付接口。本次修改不改变线上认证行为。
+状态：2026-10-18 确认的设计，2026-10-19 实现（DB v4，Hydra v26.2.0）。当前实体、字段与状态机以 [model](model.md) 为准；本文保留设计理由、威胁边界与验收标准，第 11 节记录实现时对 Hydra 实测得到的行为和仍未覆盖的部分。
 
 本文是后续身份改造的依据，优先于早期架构草案中“所有 Agent 绑定 User”“所有 access 会话只能表示 User”的描述。
 
-接入和配置变更均不设置人工审批流程。用户本人完成 OAuth 登录与 Workspace/身份选择后，Control 自动执行权限和策略校验，通过即注册并签发凭据；不通过直接拒绝。没有额外审批人、审批队列、待审批状态或设备批准按钮。取消审批这部分已在当前代码实现：`Approval`、`pendingApproval`、`/approval` 和 `autoApprove` 已经删除（DB v3 迁移），当前实体与状态机见 [model](model.md)；本文其余的 SA 与 Device Flow 仍待实现。
+接入和配置变更均不设置人工审批流程。用户本人完成 OAuth 登录与 Workspace/身份选择后，Control 自动执行权限和策略校验，通过即注册并签发凭据；不通过直接拒绝。没有额外审批人、审批队列、待审批状态或设备批准按钮。取消审批这部分已在当前代码实现：`Approval`、`pendingApproval`、`/approval` 和 `autoApprove` 已经删除（DB v3 迁移），当前实体与状态机见 [model](model.md)。
 
 ## 1. 已确定的模型
 
@@ -226,7 +226,7 @@ Control 的持续权威是当前主体、Membership、Agent、生效配置及 Gr
 
 ## 8. 目标 REST API 与 Console
 
-以下是待实现契约，不提前写入当前运行时 OpenAPI。实现时必须同时更新服务端校验、OpenAPI、生成 SDK、Console 和 agentd。
+以下契约已经实现，并已写入 OpenAPI、生成 SDK、Console 和 agentd。
 
 | 路径 | 目标方法与权限 |
 |---|---|
@@ -235,6 +235,8 @@ Control 的持续权威是当前主体、Membership、Agent、生效配置及 Gr
 | `/v1/workspaces/{workspaceId}/service-accounts/{id}/enrollment-keys` | maintainer+ 创建无人值守注册密钥，SA 和 Workspace 从路径确定，不接收 User ID |
 | `/v1/workspaces/{workspaceId}/enrollment-keys` | 继续独立分页列表/详情/撤销，增加 SA 与 createdBy 筛选；旧 User key 标为 legacy |
 | `/v1/agent-enrollments` | Device Flow AT 的单次注册兑换；不接受浏览器 Cookie 或普通管理 Token 代替该用途 AT |
+| `/v1/device-authorizations/{id}`、`/confirm`、`/reject` | Console 确认页读取可选项并提交选择/拒绝；只接受发起这次授权的浏览器中、经 SSO 的本人会话与 CSRF，不接受 Bearer |
+| `/oauth/device`、`/oauth/login`、`/oauth/consent`、`/oauth/device/done`、`/oauth/error` | Hydra 的 device verification、login、consent、success 与 error URL，由 Control 实现；浏览器导航端点，不是 AJAX API |
 | `/v1/admin/agents`、`/v1/workspaces/{workspaceId}/agents` | 保留现有资源层级，使用 `principalType/principalId` 筛选，`createdBy` 独立显示 |
 | 旧 Agent `/approval` 端点与 `pendingApproval` 字段 | 已移除；以自动校验、生效配置/版本（`effective`）及 `lastRejection` 代替，不增加新的审批接口 |
 | Workspace 的 `/grants` | 增加显式 SA subject；校验实际资源权限、SA 归属以及消费路径是否支持该主体 |
@@ -243,7 +245,7 @@ SA 管理要求 maintainer+；给 SA 授业务权限还必须具备对应资源�
 
 Console 增加 Service Accounts 管理页面及设备主体列。创建服务器注册密钥时选择 SA，不再选择“注册用户”，也没有 `autoApprove` 选项。Device Flow 页面依次展示登录用户、Workspace、可选主体和最终确认；User 选项永远是本人，只有具备权限时才展示可选 SA。设备页展示 Desired、生效配置、同步状态和校验错误，移除审批按钮与待审批筛选。
 
-agentd 在同一二进制内提供 `agentd login --config FILE` 和 `--no-browser` 形式的 Device Flow（均为待实现命令）；支持系统浏览器和复制 verification URI/user_code。既有 `enroll --key-file` 保留为无人值守路径，新密钥只能绑定 SA。配置文件只表达实例、Workspace 提示及本地角色；实际 Workspace/主体来自可信授权结果并保存到私有 profile，修改 YAML 不能改绑。
+agentd 在同一二进制内提供 `agentd login --config FILE` 和 `--no-browser` 形式的 Device Flow；支持系统浏览器和复制 verification URI/user_code。既有 `enroll --key-file` 保留为无人值守路径，新密钥只能绑定 SA。配置文件只表达实例、Workspace 提示及本地角色；实际 Workspace/主体来自可信授权结果并保存到私有 profile，修改 YAML 不能改绑。
 
 ## 9. Helm 与组件部署
 
@@ -253,11 +255,11 @@ Hydra public issuer 可以使用单独域名，也可以与 Console 同源，由
 
 Hydra Admin 默认不应被当作公开认证边界：ClusterIP 本身不是授权。NetworkPolicy/服务身份必须将 Admin API 限制给 Control 和指定初始化组件；跨信任边界时增加受认证的服务通道。Hydra 与 agents 业务数据使用独立 DB/schema 和账号，Cookie/system/signing secrets 放 Kubernetes Secret，支持按官方流程轮换及备份。
 
-后续 Helm values 需区分上游 `oidc` 与本实例 `hydra` / authorization server 配置，不能把上游 OIDC client secret 当作 agentd public-client secret。CLI 不包含任何共享 confidential secret。当前 chart 尚未提供这些 Hydra values，本设计不要求立即部署新组件。
+Helm values 区分上游 `oidc` 与本实例 `hydra` 配置，不能把上游 OIDC client secret 当作 agentd public-client secret。CLI 不包含任何共享 confidential secret。chart 的 `hydra` values、迁移 Job 和 NetworkPolicy 见 [Helm 部署](helm.md)。
 
 ## 10. 迁移顺序与验收门槛
 
-1. **显式数据迁移**：当前 DB 最高 v2；下一次迁移新增 SA、typed principal 和兑换关联，SQLite/PostgreSQL 均有约束与事务测试。Agent、key、token 的关系列与 JSON payload 同步迁移，恰有一个主体且 SA 与 Agent 同 Workspace。
+1. **显式数据迁移**（DB v4 已实现）：新增 SA、typed principal 和兑换关联，SQLite/PostgreSQL 均有约束与事务测试。Agent、key、token 的关系列与 JSON payload 同步迁移，恰有一个主体且 SA 与 Agent 同 Workspace。
 2. **保留旧身份与访问边界，去掉审批流程**：所有旧 Agent/设备凭据迁为原 `UserID` 对应的 User principal，保留 ID、Hash、期限、撤销和 Grant 窗口，不全量改成 SA。旧 `Approval` 转为可追溯的历史生效配置并按当前策略重新计算；旧 pending/扩权请求自动重新校验，合法则生效，非法则明确拒绝，不能无条件激活，也不继续等待人工审批。迁移不调用旧 approve 的默认 Grant 创建逻辑，不新增或延长成员/匿名授权；新版本正常创建服务时的默认授权仍按明确的 Workspace 策略执行。撤销状态不得复活。旧 User 注册密钥只兼容至撤销/到期，其 `autoApprove` 开关退出新模型。
 3. **审计来源保真**：旧 key 的 `UserID` 可能是代注册目标，并非创建者；只从可信审计回填 createdBy，未知则保留 legacy/unknown，不伪造历史。
 4. **统一认证内核**：typed subject 必须贯穿 Control Identity、SDK wire 类型、Edge Principal、Decision、Flow 与续租；不能把 SA ID 填进 `UserID` 冒充兼容。按能力协商/协议版本拒绝不支持 SA 的客户端或 Edge。
@@ -278,3 +280,18 @@ Hydra Admin 默认不应被当作公开认证边界：ClusterIP 本身不是授�
 - TLS、XHTTP packet-up、路由选择和当前独立角色/流撤权约束保持；不引入新的加密算法或要求 CDN 透传客户端 mTLS。
 
 参考：[RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)、[RFC 7662](https://www.rfc-editor.org/rfc/rfc7662)、[Hydra login/consent](https://www.ory.com/docs/oauth2-oidc/custom-login-consent/flow)、[Hydra Device Authorization](https://www.ory.com/docs/oauth2-oidc/device-authorization)。具体 Hydra endpoint/模型以锁定版本的 OpenAPI 为准；文档示例与不同版本可能存在路径差异，CLI 优先使用 discovery。
+
+## 11. 实现说明（Hydra v26.2.0 实测）
+
+实现以真实 Hydra 逐项验证了第 4、5 节依赖的行为；CI 使用模拟同样行为的 `internal/hydra/hydratest`，设置 `AGENTS_TEST_HYDRA_BIN` 后 Control 测试和 Console 浏览器冒烟测试会改用真实 Hydra 跑完整链路。
+
+- **验证码**：Hydra 把浏览器转到 Control 的 verification URL 时带 `device_challenge`，经 `verification_uri_complete` 进入时还带 `user_code`。Control 预填但仍要求本人提交，提交即 Hydra 的 device accept；错误或过期的验证码在本页提示。
+- **login 与 subject**：Hydra 在 verifier 被使用前允许重复 accept login，且以最后一次为准。Control 只用已确认、不可修改的记录主体调用 accept（重复确认幂等），consent 时再核对 subject 与记录一致，被替换则拒绝。
+- **consent 关联**：consent 请求里的 `login_challenge` 是 Hydra 内部 ID，不等于 login 页收到的 challenge。Control 通过自己写入 login context 的 `authorizationId` 找回记录，并要求同一浏览器事务 Cookie（HttpOnly、SameSite=Lax，只保存哈希）和同一 SSO 会话。
+- **audience**：Hydra 的 device authorization 不按 client 白名单校验 audience，缺省或外来 audience 也会进入 login。Control 在 login、consent 和兑换三处都要求 scope 恰为 `agents:enroll`、audience 恰为本实例注册 audience。
+- **拒绝与过期**：拒绝 login/consent 后 Hydra 不会通知轮询中的设备，设备一直得到 `authorization_pending` 直到验证码过期；Hydra 对拒绝也只返回裸错误文档。因此 Control 在告知 Hydra 后显示自己的页面，`agentd login` 提示拒绝后按 Ctrl+C。
+- **client**：Control 启动后在后台持续调和 agentd public client（只有 device-code grant、`token_endpoint_auth_method=none`、opaque、scope 与 audience 精确），并把设备 AT 有效期设为 5 分钟；Hydra 暂不可用不阻止 Control 启动。
+- **页面**：Control 全局 `Referrer-Policy: no-referrer` 会让浏览器在表单提交时发送 `Origin: null`，验证码页因此改用 `same-origin`。login challenge 约 1–2 KiB，长度上限按 4 KiB 处理。
+- **会话**：可复用的人类会话必须来自上游 OIDC 登录；没有 OIDC 时只在 `developmentHTTP` 实例接受粘贴令牌的会话，配置校验在其他情况下拒绝启用 `hydra`。
+
+尚未实现：注册响应丢失后的受控恢复（目前由本人撤销残留设备后重新 `agentd login`）、产品内撤销已兑换授权时同步撤销 Hydra grant/AT（AT 5 分钟后自然失效，已消费授权不能再兑换）、保存 AT 指纹，以及服务器安装入口对 User 主体 server profile 的拒绝。

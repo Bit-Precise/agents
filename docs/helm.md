@@ -2,7 +2,7 @@
 
 本 chart 将服务端拆为 Control、Edge 和 Console 三个进程、三个镜像、三个 Deployment。它使用当前的单 Control、单 Edge 状态模型；PostgreSQL 或多个 Console 副本不会让 Control/Edge 自动具备高可用能力。
 
-后续 [身份与 Device Flow 设计](identity-and-device-flow.md) 将增加独立 Hydra、数据库、迁移/设备 client 初始化和受保护的 Admin API。该部分尚未进入当前 chart，不要将设计中的 Hydra 参数当作已支持 values。接入及配置变更的人工审批已取消，由 Control 自动校验，无需额外部署参数。
+可选的 Ory Hydra 为 `agentd login` 提供 OAuth Device Flow（见下文“Hydra（agentd login）”与 [身份与 Device Flow 设计](identity-and-device-flow.md)）。接入及配置变更没有人工审批，由 Control 自动校验，无需额外部署参数。
 
 ```mermaid
 flowchart LR
@@ -14,6 +14,9 @@ flowchart LR
     Control --> SQL[(SQLite PVC 或外部 PostgreSQL)]
     Edge <-->|带内部令牌的元数据 API| Control
     Edge <-->|业务流| Agent
+    Ingress -.->|issuer 路径| Hydra[Hydra public]
+    Control -.->|Admin API，仅集群内| HydraAdmin[Hydra admin]
+    Hydra -.-> HydraSQL[(Hydra 自己的 PostgreSQL)]
 ```
 
 管理 API、注册与配置自动校验、浏览器/OIDC 登录在 Control。Edge 查询 Control 的身份/路由决策并维护 provider 会话，业务正文留在 Edge↔agentd 路径。Console 不持有管理员、内部 RPC 或数据库 Secret；Control 代理它的静态资源时会剥离浏览器认证头和 Cookie。
@@ -118,6 +121,33 @@ IdP callback 精确注册为 `<public.serverURL>/auth/oidc/callback`。不配置
 
 Control 启动时需要 issuer discovery 可达。OIDC login state、授权 code 和浏览器会话在当前单进程内存中；Control 重启会使未完成登录和现有会话失效，需要重新登录。不能直接增加 Control 副本解决这类状态归属问题。
 
+## Hydra（agentd login）
+
+`agentd login` 让个人设备在浏览器中由本人通过 SSO 确认 Workspace 与运行主体（本人或服务账号），无需分发注册密钥。它需要 `oidc.enabled`，并单独部署 Hydra：
+
+```yaml
+hydra:
+  enabled: true
+  # agentd 和浏览器访问的 issuer 源，可以是独立域名，也可以与 serverURL 相同。
+  publicURL: https://auth.agents.example.com
+  database: {type: postgres}
+  # 缺省复用根 existingSecret。
+  existingSecret: agents-hydra
+  secretKeys: {dsn: hydra-dsn, systemSecrets: hydra-system-secrets}
+```
+
+```sh
+kubectl -n agents create secret generic agents-hydra \
+  --from-file=hydra-dsn=/secure/agents/hydra-dsn \
+  --from-file=hydra-system-secrets=/secure/agents/hydra-system-secrets
+```
+
+- Hydra 使用与 agents 业务数据**分开**的 PostgreSQL 数据库和账号。`hydra-system-secrets` 是逗号分隔的系统密钥，第一个用于签发，其余仍用于校验；轮换时把新密钥放在最前并重启 Hydra。`database.type: memory` 只用于评估：重启会丢失进行中的登录，且只允许一个副本。
+- 每次 install/upgrade 前，`pre-install,pre-upgrade` hook Job 执行 `hydra migrate sql up`。chart 默认镜像为已验收的 `docker.io/oryd/hydra:v26.2.0`，并以 `hydra.image.digest` 固定其多架构 manifest list 摘要；改用其他版本时 tag 与 digest 一起修改（digest 置空则只按 tag 拉取）。
+- Ingress 只把 `/.well-known/openid-configuration`、`/oauth2/device/auth`、`/oauth2/device/verify`、`/oauth2/token` 四个精确路径转到 Hydra public；与 serverURL 同域时这些路径优先于 Control 的 `/`。Hydra Admin（`<release>-hydra-admin:4445`）永不对外路由。TLS 证书需覆盖 publicURL 的主机名。
+- Control 通过 Admin API 完成 login/consent、校验并兑换 access token，并在启动后自动调和 `agentd` public client：仅 device-code grant、无 client secret、scope `agents:enroll`、audience 默认 `urn:agents:<serverURL 主机名>:agent-enrollment`、access token 5 分钟。Hydra 暂不可用时 Control 仍可启动，恢复后自动完成调和。
+- Hydra 的 login、consent、device verification、success 与 error URL 由 chart 从 `public.serverURL` 生成，均是 Control 的 `/oauth/*` 页面。
+
 ## NetworkPolicy 与内部边界
 
 默认 `networkPolicy.enabled: false`，避免假定集群的 Controller、DNS 和数据库地址。启用后请先确认 CNI 实际支持 NetworkPolicy enforcement，并调整：
@@ -126,15 +156,16 @@ Control 启动时需要 issuer discovery 可达。OIDC login state、授权 code
 - `dnsPeers`：集群 DNS；使用 NodeLocal DNS 时需要匹配相应地址。
 - `postgresEgress`：数据库地址与端口，默认例子放行 TCP/5432，应收紧到实际目的地。
 - `oidcEgress`：开启 OIDC 时的 issuer HTTPS 地址/端口，默认 TCP/443。
-- `extraEgress`：分别为 control、edge、console 添加必要规则。
+- `hydraPostgresEgress`：Hydra 及其迁移 Job 访问自己的 PostgreSQL，默认 TCP/5432。
+- `extraEgress`：分别为 control、edge、console、hydra 添加必要规则。
 
-策略默认仅允许 Control↔Edge 元数据通信、Control→Console 静态代理，以及相关 DNS/数据库/IdP 出站。Console 不接收公网 Controller 流量，默认无出站权限。内部 API 还独立验证共享令牌，网络位置不是身份凭证。
+策略默认仅允许 Control↔Edge 元数据通信、Control→Console 静态代理，以及相关 DNS/数据库/IdP 出站。启用 Hydra 时，Hydra public 端口只接受 `ingressFrom`，Admin 端口只接受 Control。Console 不接收公网 Controller 流量，默认无出站权限。内部 API 还独立验证共享令牌，网络位置不是身份凭证。
 
 ## 升级与运行检查
 
 Control 和 Edge 使用 `Recreate` 且限制单副本。升级、内部令牌轮换或 Pod 故障会中断现有会话；agentd 重连后建立新流，不重放已发送的应用数据。Console 可多副本滚动更新。
 
-外部 Secret 内容变化不会触发 checksum rollout。协调更新 `internal.token` 后重启 Control/Edge；不存在自动双密钥宽限协议。OIDC client secret 或 PostgreSQL DSN 更新也需要 Control 重启。保持 bootstrap 管理员身份与数据库一致，不要在升级时无意替换所有秘密。
+外部 Secret 内容变化不会触发 checksum rollout。协调更新 `internal.token` 后重启 Control/Edge；不存在自动双密钥宽限协议。OIDC client secret 或 PostgreSQL DSN 更新也需要 Control 重启；Hydra DSN 或系统密钥更新需要重启 Hydra。保持 bootstrap 管理员身份与数据库一致，不要在升级时无意替换所有秘密。
 
 ```sh
 kubectl -n agents get deployments,pods,services

@@ -99,17 +99,9 @@ func restRequire(t *testing.T, r *httptest.ResponseRecorder, status int, out any
 }
 func (f restFixture) enroll(t *testing.T, user types.User, name string) types.EnrollResponse {
 	t.Helper()
-	_, key, err := f.app.State.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: user.ID, Roles: []string{"ingress", "serve", "egress"}, MaxUses: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
 	rule := policy.Rule{Domain: policy.Domain{Exact: "outbound.test"}, Ports: []int{443}, Protocol: "tls"}
 	desired := api.AgentSpec{Ingress: api.IngressSpec{Enabled: true}, Serve: api.ServeSpec{Enabled: true, Services: []api.ServiceSpec{{Name: name + "-app", Origin: "http://127.0.0.1:37842"}}}, Egress: api.EgressSpec{Enabled: true, Allow: []policy.Rule{rule}}}
-	result, err := f.app.State.Enroll(types.EnrollRequest{EnrollmentKey: key, Instance: f.app.Config.ServerURL, Endpoint: f.app.Config.EdgeURL, Workspace: f.workspace.Name, Name: name, Desired: desired})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result
+	return enrollDevice(t, f.app.State, user.ID, f.workspace, name, desired)
 }
 
 type restPage[T any] struct {
@@ -260,7 +252,14 @@ func TestRESTHasNoApprovalAndShowsAutomaticEffectiveConfig(t *testing.T) {
 	if strings.Contains(response.Body.String(), "pendingApproval") || detail.Status != api.StatusActive || detail.Effective.Revision != enrolled.Agent.Effective.Revision+1 || detail.Effective.Services[0].Origin != "http://127.0.0.1:37843" {
 		t.Fatalf("automatic update not visible as the effective configuration: %s", response.Body.String())
 	}
-	restRequire(t, f.request(t, "POST", "/v1/admin/enrollment-keys", restBootstrap, map[string]any{"workspaceId": f.workspace.ID, "roles": []string{"ingress"}, "autoApprove": true}), 400, nil)
+	sa, err := f.app.State.CreateServiceAccount(f.admin.ID, f.workspace.ID, "robot", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restRequire(t, f.request(t, "POST", "/v1/workspaces/"+f.workspace.ID+"/service-accounts/"+sa.ID+"/enrollment-keys", restBootstrap, map[string]any{"roles": []string{"ingress"}, "autoApprove": true}), 400, nil)
+	if code := f.request(t, "POST", "/v1/admin/enrollment-keys", restBootstrap, map[string]any{"workspaceId": f.workspace.ID, "userId": f.alice.ID, "roles": []string{"ingress"}}).Code; code != 404 && code != 405 {
+		t.Fatalf("user enrollment key creation still answers %d", code)
+	}
 }
 
 func TestRESTSessionsCSRFAndStrictCreation(t *testing.T) {
@@ -302,8 +301,23 @@ func TestRESTSessionsCSRFAndStrictCreation(t *testing.T) {
 		restRequire(t, out, test.want, nil)
 	}
 	restRequire(t, f.request(t, "DELETE", "/v1/sessions/current", "", nil), 401, nil)
-	base := "/v1/workspaces/" + f.workspace.ID + "/enrollment-keys"
-	for _, body := range []any{map[string]any{"workspaceId": nil, "roles": []string{"ingress"}}, map[string]any{"workspaceId": f.workspace.ID, "roles": []string{"ingress"}}, map[string]any{"workspaceId": "", "roles": []string{"ingress"}}, map[string]any{"roles": []string{"ingress"}, "id": "injected"}, map[string]any{"roles": []string{"ingress"}, "uses": 999}} {
+	// Unattended keys belong to a Service Account; both come from the path.
+	workspaceBase := "/v1/workspaces/" + f.workspace.ID
+	restRequire(t, f.request(t, "POST", workspaceBase+"/service-accounts", f.aliceToken, map[string]any{"name": "ci"}), 403, nil)
+	if _, err := f.app.State.SetMembership(f.admin.ID, f.workspace.ID, f.alice.ID, "maintainer"); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []any{map[string]any{"name": "ci", "workspaceId": f.workspace.ID}, map[string]any{"name": "ci", "status": "active"}, map[string]any{"name": "Not A Label"}} {
+		restRequire(t, f.request(t, "POST", workspaceBase+"/service-accounts", f.aliceToken, body), 400, nil)
+	}
+	var sa types.ServiceAccount
+	response = f.request(t, "POST", workspaceBase+"/service-accounts", f.aliceToken, map[string]any{"name": "ci", "description": "build runners"})
+	restRequire(t, response, 201, &sa)
+	if sa.WorkspaceID != f.workspace.ID || sa.CreatedBy != f.alice.ID || response.Header().Get("Location") != workspaceBase+"/service-accounts/"+sa.ID {
+		t.Fatalf("service account creation: %+v %s", sa, response.Header().Get("Location"))
+	}
+	base := workspaceBase + "/service-accounts/" + sa.ID + "/enrollment-keys"
+	for _, body := range []any{map[string]any{"workspaceId": f.workspace.ID, "roles": []string{"ingress"}}, map[string]any{"userId": f.alice.ID, "roles": []string{"ingress"}}, map[string]any{"serviceAccountId": sa.ID, "roles": []string{"ingress"}}, map[string]any{"roles": []string{"ingress"}, "id": "injected"}, map[string]any{"roles": []string{"ingress"}, "uses": 999}} {
 		restRequire(t, f.request(t, "POST", base, f.aliceToken, body), 400, nil)
 	}
 	response = f.request(t, "POST", base, f.aliceToken, map[string]any{"roles": []string{"ingress"}})
@@ -312,16 +326,22 @@ func TestRESTSessionsCSRFAndStrictCreation(t *testing.T) {
 		Token string              `json:"token"`
 	}
 	restRequire(t, response, 201, &key)
-	if key.Key.WorkspaceID != f.workspace.ID || key.Token == "" || response.Header().Get("Location") != base+"/"+key.Key.ID {
-		t.Fatal("nested resource creation returned wrong location or workspace")
+	keys := workspaceBase + "/enrollment-keys"
+	if key.Key.WorkspaceID != f.workspace.ID || key.Key.ServiceAccountID != sa.ID || key.Key.UserID != "" || key.Token == "" || response.Header().Get("Location") != keys+"/"+key.Key.ID {
+		t.Fatalf("service account key creation returned %+v at %s", key.Key, response.Header().Get("Location"))
 	}
-	restRequire(t, f.request(t, "PATCH", base+"/"+key.Key.ID, f.aliceToken, map[string]bool{"revoked": false}), 400, nil)
+	var listed restPage[types.EnrollmentKey]
+	restRequire(t, f.request(t, "GET", keys+"?serviceAccountId="+sa.ID, f.aliceToken, nil), 200, &listed)
+	if listed.Pagination.Total != 1 || listed.Items[0].ID != key.Key.ID {
+		t.Fatalf("keys by service account: %+v", listed)
+	}
+	restRequire(t, f.request(t, "PATCH", keys+"/"+key.Key.ID, f.aliceToken, map[string]bool{"revoked": false}), 400, nil)
 }
 
 func TestRESTTelemetryConsumerVisibilityAndUnavailable(t *testing.T) {
 	f := newRESTFixture(t)
 	provider := f.enroll(t, f.alice, "exit")
-	status := edge.Snapshot{Connections: []edge.ConnectionStatus{{ID: "provider-connection", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, Role: "provider"}}, Flows: []edge.FlowStatus{{ID: "alice-flow", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, UserID: f.alice.ID, Purpose: "egress"}, {ID: "bob-flow", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, UserID: f.bob.ID, Purpose: "egress"}, {ID: "anonymous-flow", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, Purpose: "serve"}}}
+	status := edge.Snapshot{Connections: []edge.ConnectionStatus{{ID: "provider-connection", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, Role: "provider"}}, Flows: []edge.FlowStatus{{ID: "alice-flow", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, Consumer: &api.Principal{Type: api.PrincipalUser, ID: f.alice.ID}, Purpose: "egress"}, {ID: "bob-flow", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, Consumer: &api.Principal{Type: api.PrincipalUser, ID: f.bob.ID}, Purpose: "egress"}, {ID: "anonymous-flow", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, Purpose: "serve"}}}
 	telemetry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, status) }))
 	defer telemetry.Close()
 	client, err := controlrpc.NewClient(telemetry.URL, "internal-test-token-over-thirty-two-characters")
@@ -494,5 +514,59 @@ func TestRESTRoleStatusUsesEffectiveConfigAndOwnerState(t *testing.T) {
 		if list.Pagination.Total != 0 || len(list.Items) != 0 {
 			t.Fatal("status filter retained a revoked agent")
 		}
+	}
+}
+
+func TestRESTServiceAccountLifecycleAndVisibility(t *testing.T) {
+	f := newRESTFixture(t)
+	base := "/v1/workspaces/" + f.workspace.ID + "/service-accounts"
+	restRequire(t, f.request(t, "POST", "/v1/admin/service-accounts", restBootstrap, map[string]any{"name": "fleet"}), 400, nil)
+	var sa types.ServiceAccount
+	restRequire(t, f.request(t, "POST", "/v1/admin/service-accounts", restBootstrap, map[string]any{"workspaceId": f.workspace.ID, "name": "fleet"}), 201, &sa)
+	restRequire(t, f.request(t, "POST", base, restBootstrap, map[string]any{"name": "fleet"}), 409, nil)
+	var accounts restPage[types.ServiceAccount]
+	restRequire(t, f.request(t, "GET", base, f.aliceToken, nil), 200, &accounts)
+	if accounts.Pagination.Total != 0 {
+		t.Fatal("a developer listed service accounts")
+	}
+	restRequire(t, f.request(t, "PATCH", base+"/"+sa.ID, f.aliceToken, map[string]any{"description": "mine"}), 404, nil)
+	for _, body := range []any{map[string]any{"description": "x", "status": "revoked"}, map[string]any{"workspaceId": f.foreign.ID}, map[string]any{"status": "active"}, map[string]any{"name": "renamed"}} {
+		restRequire(t, f.request(t, "PATCH", base+"/"+sa.ID, restBootstrap, body), 400, nil)
+	}
+	restRequire(t, f.request(t, "PATCH", base+"/"+sa.ID, restBootstrap, map[string]any{"description": "fleet runners"}), 200, &sa)
+	if sa.Description != "fleet runners" || sa.WorkspaceID != f.workspace.ID {
+		t.Fatalf("updated service account: %+v", sa)
+	}
+	var key struct {
+		Key   types.EnrollmentKey `json:"key"`
+		Token string              `json:"token"`
+	}
+	restRequire(t, f.request(t, "POST", base+"/"+sa.ID+"/enrollment-keys", restBootstrap, map[string]any{"roles": []string{"ingress", "serve", "egress"}, "maxUses": 2}), 201, &key)
+	desired := api.AgentSpec{Ingress: api.IngressSpec{Enabled: true}}
+	enrolled, err := f.app.State.Enroll(types.EnrollRequest{EnrollmentKey: key.Token, Instance: f.app.Config.ServerURL, Endpoint: f.app.Config.EdgeURL, Workspace: f.workspace.Name, Name: "runner", Desired: desired})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var agents restPage[types.Agent]
+	restRequire(t, f.request(t, "GET", "/v1/admin/agents?principalType=service_account&principalId="+sa.ID, restBootstrap, nil), 200, &agents)
+	if agents.Pagination.Total != 1 || agents.Items[0].ID != enrolled.Agent.ID || agents.Items[0].CreatedBy != f.admin.ID {
+		t.Fatalf("agents by principal: %+v", agents)
+	}
+	restRequire(t, f.request(t, "GET", "/v1/workspaces/"+f.workspace.ID+"/agents", f.aliceToken, nil), 200, &agents)
+	if agents.Pagination.Total != 0 {
+		t.Fatal("a developer saw a service account device")
+	}
+	restRequire(t, f.request(t, "PATCH", base+"/"+sa.ID, restBootstrap, map[string]any{"status": "revoked"}), 200, &sa)
+	if sa.Status != api.StatusRevoked {
+		t.Fatalf("revoked service account: %+v", sa)
+	}
+	if agent, _ := f.app.State.Agent(enrolled.Agent.ID); agent.Status != api.StatusRevoked {
+		t.Fatal("revoking the service account left its device active")
+	}
+	restRequire(t, f.request(t, "POST", base+"/"+sa.ID+"/enrollment-keys", restBootstrap, map[string]any{"roles": []string{"ingress"}}), 403, nil)
+	restRequire(t, f.request(t, "PATCH", base+"/"+sa.ID, restBootstrap, map[string]any{"description": "again"}), 409, nil)
+	restRequire(t, f.request(t, "GET", "/v1/admin/service-accounts?status=revoked", restBootstrap, nil), 200, &accounts)
+	if accounts.Pagination.Total != 1 || accounts.Items[0].ID != sa.ID {
+		t.Fatalf("revoked filter: %+v", accounts)
 	}
 }

@@ -42,6 +42,8 @@ func TestIndependentProcessesServeEgressAndControlFailure(t *testing.T) {
 	origin := func(addr string) string { return "http://localhost:" + strings.Split(addr, ":")[1] }
 	cfg := control.Config{ListenAddress: controlAddr, ServerURL: origin(controlAddr), EdgeURL: origin(edgeAddr) + "/agent", StateDir: filepath.Join(dir, "state"), AdminTokenFile: filepath.Join(dir, "admin.token"), InternalTokenFile: filepath.Join(dir, "internal.token"), DevelopmentHTTP: true, ControlURL: origin(controlAddr), EdgeInternalURL: origin(edgeAddr), ConsoleURL: origin(consoleAddr)}
 	cfg.Database.Type, cfg.Database.DSN = "sqlite", filepath.Join(dir, "state", "control.db")
+	fake, hydraConfig := newHydra(t, cfg.ServerURL)
+	cfg.Hydra = hydraConfig
 	for path, secret := range map[string]string{cfg.AdminTokenFile: adminToken, cfg.InternalTokenFile: splitToken} {
 		if err := os.WriteFile(path, []byte(secret), 0600); err != nil {
 			t.Fatal(err)
@@ -103,7 +105,7 @@ func TestIndependentProcessesServeEgressAndControlFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(status.Close)
-	h := &harness{t: t, cfg: cfg, base: cfg.ServerURL, edgeBase: cfg.EdgeInternalURL, remoteStatus: status, client: client}
+	h := &harness{t: t, cfg: cfg, base: cfg.ServerURL, edgeBase: cfg.EdgeInternalURL, remoteStatus: status, client: client, hydra: fake}
 	for _, base := range []string{cfg.ControlURL, cfg.EdgeInternalURL} {
 		response, err := client.Post(base+controlrpc.Prefix+"snapshot", "application/json", strings.NewReader("null"))
 		if err != nil {
@@ -149,7 +151,7 @@ func TestIndependentProcessesServeEgressAndControlFailure(t *testing.T) {
 	t.Cleanup(originServer.Close)
 	agentCfg := h.agentConfig(w.Name, "provider")
 	agentCfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "stream", Origin: originServer.URL}}}
-	enrolled, _ := h.enroll(agentCfg, w, u, []string{"serve"})
+	enrolled, _ := h.login(agentCfg, w, u)
 	h.runAgent(agentCfg, enrolled)
 	await(t, func() bool { return h.connected(enrolled.Agent.ID, "provider") })
 	stream, err := h.serveRequest(serviceHost("stream", w.Name), u.Token, "/")
@@ -186,7 +188,7 @@ func testSplitServiceSSO(t *testing.T, h *harness, client *http.Client) {
 	defer originServer.Close()
 	cfg := h.agentConfig(w.Name, "provider")
 	cfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "private", Origin: originServer.URL}}}
-	enrolled, _ := h.enroll(cfg, w, u, []string{"serve"})
+	enrolled, _ := h.login(cfg, w, u)
 	stop := h.runAgent(cfg, enrolled)
 	defer stop()
 	await(t, func() bool { return h.connected(enrolled.Agent.ID, "provider") })

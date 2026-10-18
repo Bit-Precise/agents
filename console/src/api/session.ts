@@ -60,14 +60,17 @@ export function requestSignal() {
   return AbortSignal.timeout(15000);
 }
 
-// Browser navigation is intentionally distinct from JSON SDK calls.
+// Browser navigation is intentionally distinct from JSON SDK calls. After
+// sign-in the Console continues only to a service authorization or to an
+// `agentd login` request; Control validates both again.
 export function serviceReturnTo(): string | null {
   const value = new URLSearchParams(window.location.search).get("returnTo");
-  if (!value?.startsWith("/auth/authorize?")) return null;
+  const paths = ["/auth/authorize", "/oauth/login"];
+  if (!paths.some((path) => value?.startsWith(path + "?"))) return null;
   try {
-    const target = new URL(value, window.location.origin);
+    const target = new URL(value!, window.location.origin);
     return target.origin === window.location.origin &&
-      target.pathname === "/auth/authorize"
+      paths.includes(target.pathname)
       ? target.pathname + target.search
       : null;
   } catch {

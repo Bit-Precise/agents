@@ -49,7 +49,6 @@ export type Agent = {
     id: string;
     workspaceId: string;
     workspace: string;
-    userId: string;
     name: string;
     status: 'active' | 'revoked';
     /**
@@ -61,17 +60,27 @@ export type Agent = {
     lastRejection?: ConfigRejection;
     createdAt: string;
     revokedAt?: string;
+    principal: Principal;
+    /**
+     * The person who registered the device; never used for permission checks.
+     */
+    createdBy?: string;
 };
 
 export type EnrollmentKey = {
     id: string;
     workspaceId: string;
-    userId: string;
+    /**
+     * Legacy personal key; new keys always bind a Service Account.
+     */
+    userId?: string;
     roles: Array<'ingress' | 'serve' | 'egress'>;
     uses: number;
     maxUses: number;
     expiresAt: string;
     revoked: boolean;
+    serviceAccountId?: string;
+    createdBy?: string;
 };
 
 export type Grant = {
@@ -79,7 +88,10 @@ export type Grant = {
     workspaceId: string;
     resourceId: string;
     resourceType: 'service' | 'egress';
-    subjectType: 'user' | 'workspace' | 'anonymous';
+    /**
+     * workspace matches human members only; service_account grants are for egress.
+     */
+    subjectType: 'user' | 'workspace' | 'anonymous' | 'service_account';
     subjectId?: string;
     startsAt: string;
     expiresAt: string;
@@ -126,7 +138,6 @@ export type FlowStatus = {
     resourceId: string;
     workspaceId: string;
     workspace: string;
-    userId?: string;
     agentId: string;
     state: string;
     purpose: 'serve' | 'egress';
@@ -135,6 +146,10 @@ export type FlowStatus = {
     startedAt: string;
     expiresAt: string;
     hardDeadline: string;
+    /**
+     * The browser User for serve, the ingress Agent's principal for egress; absent for anonymous serve.
+     */
+    consumer?: Principal;
 };
 
 export type Info = {
@@ -145,6 +160,7 @@ export type Info = {
         enabled: boolean;
         loginURL: string;
     };
+    deviceAuthorization?: DeviceAuthorizationInfo;
 };
 
 export type Session = {
@@ -175,6 +191,7 @@ export type Credentials = {
     controlToken?: string;
     controlUrl?: string;
     effective: EffectiveConfig;
+    principal?: Principal;
 };
 
 export type EnrollRequest = {
@@ -200,19 +217,14 @@ export type CreateWorkspace = {
     name: string;
 };
 
-export type CreateEnrollmentKey = {
-    workspaceId: string;
-    userId?: string;
-    roles: Array<'ingress' | 'serve' | 'egress'>;
-    maxUses?: number;
-    expiresAt?: string;
-};
-
 export type CreateGrant = {
     workspaceId: string;
     resourceType: 'service' | 'egress';
     resourceId: string;
-    subjectType: 'user' | 'workspace' | 'anonymous';
+    /**
+     * workspace matches human members only; service_account grants are for egress.
+     */
+    subjectType: 'user' | 'workspace' | 'anonymous' | 'service_account';
     subjectId?: string;
     startsAt?: string;
     expiresAt: string;
@@ -372,17 +384,13 @@ export type AgentSummary = {
     roles: Array<'ingress' | 'serve' | 'egress'>;
 };
 
-export type CreateWorkspaceEnrollmentKey = {
-    userId?: string;
-    roles: Array<'ingress' | 'serve' | 'egress'>;
-    maxUses?: number;
-    expiresAt?: string;
-};
-
 export type CreateWorkspaceGrant = {
     resourceType: 'service' | 'egress';
     resourceId: string;
-    subjectType: 'user' | 'workspace' | 'anonymous';
+    /**
+     * workspace matches human members only; service_account grants are for egress.
+     */
+    subjectType: 'user' | 'workspace' | 'anonymous' | 'service_account';
     subjectId?: string;
     startsAt?: string;
     expiresAt: string;
@@ -505,6 +513,127 @@ export type EgressRoute = {
     enabled: boolean;
 };
 
+/**
+ * Who an Agent runs as: exactly one User or one Service Account of the Agent's Workspace.
+ */
+export type Principal = {
+    type: 'user' | 'service_account';
+    id: string;
+};
+
+/**
+ * A machine principal of one Workspace. Revocation is terminal.
+ */
+export type ServiceAccount = {
+    id: string;
+    workspaceId: string;
+    name: string;
+    description?: string;
+    status: 'active' | 'revoked';
+    createdBy?: string;
+    createdAt: string;
+    revokedAt?: string;
+};
+
+export type ServiceAccountsPage = {
+    items: Array<ServiceAccount>;
+    pagination: Pagination;
+};
+
+export type CreateServiceAccount = {
+    workspaceId: string;
+    name: string;
+    description?: string;
+};
+
+export type CreateWorkspaceServiceAccount = {
+    name: string;
+    description?: string;
+};
+
+/**
+ * Send either description or status: revoked. The Workspace and name never change.
+ */
+export type UpdateServiceAccount = {
+    description?: string;
+    status?: 'revoked';
+};
+
+export type CreateServiceAccountEnrollmentKey = {
+    roles: Array<'ingress' | 'serve' | 'egress'>;
+    maxUses?: number;
+    expiresAt?: string;
+};
+
+/**
+ * The instance's OAuth authorization server and public agentd client for `agentd login`.
+ */
+export type DeviceAuthorizationInfo = {
+    issuer: string;
+    clientId: string;
+    scope: string;
+    audience: string;
+};
+
+export type DeviceAuthorization = {
+    id: string;
+    status: 'awaiting_user' | 'authorized' | 'consumed' | 'revoked' | 'expired';
+    clientId: string;
+    actorUserId: string;
+    workspaceId?: string;
+    principal?: Principal;
+    allowedRoles?: Array<'ingress' | 'serve' | 'egress'>;
+    createdAt: string;
+    expiresAt: string;
+    authorizedAt?: string;
+    consumedAt?: string;
+    agentId?: string;
+};
+
+/**
+ * A Workspace the person may register the device in, as themselves (self) or as one of the listed Service Accounts.
+ */
+export type DeviceChoice = {
+    workspace: Workspace;
+    role?: string;
+    self: boolean;
+    selfRoles?: Array<'ingress' | 'serve' | 'egress'>;
+    serviceAccounts: Array<ServiceAccount>;
+};
+
+export type DeviceAuthorizationView = {
+    authorization: DeviceAuthorization;
+    choices: Array<DeviceChoice>;
+    user: User;
+    /**
+     * The code typed in this browser, for comparison with the terminal.
+     */
+    userCode?: string;
+};
+
+export type ConfirmDeviceAuthorization = {
+    workspaceId: string;
+    principal: Principal;
+};
+
+export type DeviceRedirect = {
+    /**
+     * The authorization server URL the browser continues at.
+     */
+    redirectTo: string;
+};
+
+/**
+ * The Workspace is a hint that must equal the confirmed authorization's Workspace.
+ */
+export type AgentEnrollment = {
+    instance: string;
+    endpoint: string;
+    workspace: string;
+    name: string;
+    desired: AgentSpec;
+};
+
 export type EnrollData = {
     body: EnrollRequest;
     path?: never;
@@ -586,6 +715,31 @@ export type UpdateAgentConfigResponses = {
 
 export type UpdateAgentConfigResponse = UpdateAgentConfigResponses[keyof UpdateAgentConfigResponses];
 
+export type CreateAgentEnrollmentData = {
+    body: AgentEnrollment;
+    path?: never;
+    query?: never;
+    url: '/v1/agent-enrollments';
+};
+
+export type CreateAgentEnrollmentErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateAgentEnrollmentError = CreateAgentEnrollmentErrors[keyof CreateAgentEnrollmentErrors];
+
+export type CreateAgentEnrollmentResponses = {
+    /**
+     * Success
+     */
+    201: EnrollResponse;
+};
+
+export type CreateAgentEnrollmentResponse = CreateAgentEnrollmentResponses[keyof CreateAgentEnrollmentResponses];
+
 export type OidcLoginData = {
     body?: never;
     path?: never;
@@ -656,6 +810,208 @@ export type AuthorizeServiceResponses = {
      */
     default: unknown;
 };
+
+export type DeviceVerificationData = {
+    body?: never;
+    path?: never;
+    query: {
+        device_challenge: string;
+    };
+    url: '/oauth/device';
+};
+
+export type DeviceVerificationErrors = {
+    /**
+     * Invalid link
+     */
+    default: unknown;
+};
+
+export type DeviceVerificationResponses = {
+    /**
+     * Code form
+     */
+    200: unknown;
+};
+
+export type SubmitDeviceCodeData = {
+    body: {
+        device_challenge: string;
+        user_code: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/oauth/device';
+};
+
+export type SubmitDeviceCodeErrors = {
+    /**
+     * Code form with an error
+     */
+    default: unknown;
+};
+
+export type SubmitDeviceCodeResponses = {
+    /**
+     * Code form with an error
+     */
+    default: unknown;
+};
+
+export type DeviceLoginData = {
+    body?: never;
+    path?: never;
+    query: {
+        login_challenge: string;
+    };
+    url: '/oauth/login';
+};
+
+export type DeviceLoginErrors = {
+    /**
+     * Error page
+     */
+    default: unknown;
+};
+
+export type DeviceLoginResponses = {
+    /**
+     * Error page
+     */
+    default: unknown;
+};
+
+export type DeviceConsentData = {
+    body?: never;
+    path?: never;
+    query: {
+        consent_challenge: string;
+    };
+    url: '/oauth/consent';
+};
+
+export type DeviceConsentErrors = {
+    /**
+     * Error page
+     */
+    default: unknown;
+};
+
+export type DeviceConsentResponses = {
+    /**
+     * Error page
+     */
+    default: unknown;
+};
+
+export type DeviceDoneData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/oauth/device/done';
+};
+
+export type DeviceDoneResponses = {
+    /**
+     * Return to the terminal
+     */
+    200: unknown;
+};
+
+export type DeviceErrorData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/oauth/error';
+};
+
+export type DeviceErrorResponses = {
+    /**
+     * Error page
+     */
+    200: unknown;
+};
+
+export type GetDeviceAuthorizationData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/device-authorizations/{id}';
+};
+
+export type GetDeviceAuthorizationErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetDeviceAuthorizationError = GetDeviceAuthorizationErrors[keyof GetDeviceAuthorizationErrors];
+
+export type GetDeviceAuthorizationResponses = {
+    /**
+     * Success
+     */
+    200: DeviceAuthorizationView;
+};
+
+export type GetDeviceAuthorizationResponse = GetDeviceAuthorizationResponses[keyof GetDeviceAuthorizationResponses];
+
+export type ConfirmDeviceAuthorizationData = {
+    body: ConfirmDeviceAuthorization;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/device-authorizations/{id}/confirm';
+};
+
+export type ConfirmDeviceAuthorizationErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ConfirmDeviceAuthorizationError = ConfirmDeviceAuthorizationErrors[keyof ConfirmDeviceAuthorizationErrors];
+
+export type ConfirmDeviceAuthorizationResponses = {
+    /**
+     * Success
+     */
+    200: DeviceRedirect;
+};
+
+export type ConfirmDeviceAuthorizationResponse = ConfirmDeviceAuthorizationResponses[keyof ConfirmDeviceAuthorizationResponses];
+
+export type RejectDeviceAuthorizationData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/device-authorizations/{id}/reject';
+};
+
+export type RejectDeviceAuthorizationErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type RejectDeviceAuthorizationError = RejectDeviceAuthorizationErrors[keyof RejectDeviceAuthorizationErrors];
+
+export type RejectDeviceAuthorizationResponses = {
+    /**
+     * Declined
+     */
+    204: void;
+};
+
+export type RejectDeviceAuthorizationResponse = RejectDeviceAuthorizationResponses[keyof RejectDeviceAuthorizationResponses];
 
 export type GetInstanceData = {
     body?: never;
@@ -1147,7 +1503,9 @@ export type ListAdminAgentsData = {
         sortBy?: string;
         sortOrder?: 'asc' | 'desc';
         workspaceId?: string;
-        userId?: string;
+        principalType?: 'user' | 'service_account';
+        principalId?: string;
+        createdBy?: string;
         status?: string;
         q?: string;
     };
@@ -1238,7 +1596,9 @@ export type ListAdminEnrollmentKeysData = {
         sortBy?: string;
         sortOrder?: 'asc' | 'desc';
         workspaceId?: string;
+        serviceAccountId?: string;
         userId?: string;
+        createdBy?: string;
         revoked?: boolean;
     };
     url: '/v1/admin/enrollment-keys';
@@ -1261,31 +1621,6 @@ export type ListAdminEnrollmentKeysResponses = {
 };
 
 export type ListAdminEnrollmentKeysResponse = ListAdminEnrollmentKeysResponses[keyof ListAdminEnrollmentKeysResponses];
-
-export type CreateAdminEnrollmentKeyData = {
-    body: CreateEnrollmentKey;
-    path?: never;
-    query?: never;
-    url: '/v1/admin/enrollment-keys';
-};
-
-export type CreateAdminEnrollmentKeyErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type CreateAdminEnrollmentKeyError = CreateAdminEnrollmentKeyErrors[keyof CreateAdminEnrollmentKeyErrors];
-
-export type CreateAdminEnrollmentKeyResponses = {
-    /**
-     * Success
-     */
-    201: CreatedEnrollmentKey;
-};
-
-export type CreateAdminEnrollmentKeyResponse = CreateAdminEnrollmentKeyResponses[keyof CreateAdminEnrollmentKeyResponses];
 
 export type GetAdminEnrollmentKeyData = {
     body?: never;
@@ -1340,6 +1675,122 @@ export type UpdateAdminEnrollmentKeyResponses = {
 };
 
 export type UpdateAdminEnrollmentKeyResponse = UpdateAdminEnrollmentKeyResponses[keyof UpdateAdminEnrollmentKeyResponses];
+
+export type ListAdminServiceAccountsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, createdAt, status. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        status?: 'active' | 'revoked';
+        createdBy?: string;
+        q?: string;
+    };
+    url: '/v1/admin/service-accounts';
+};
+
+export type ListAdminServiceAccountsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminServiceAccountsError = ListAdminServiceAccountsErrors[keyof ListAdminServiceAccountsErrors];
+
+export type ListAdminServiceAccountsResponses = {
+    /**
+     * Success
+     */
+    200: ServiceAccountsPage;
+};
+
+export type ListAdminServiceAccountsResponse = ListAdminServiceAccountsResponses[keyof ListAdminServiceAccountsResponses];
+
+export type CreateAdminServiceAccountData = {
+    body: CreateServiceAccount;
+    path?: never;
+    query?: never;
+    url: '/v1/admin/service-accounts';
+};
+
+export type CreateAdminServiceAccountErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateAdminServiceAccountError = CreateAdminServiceAccountErrors[keyof CreateAdminServiceAccountErrors];
+
+export type CreateAdminServiceAccountResponses = {
+    /**
+     * Success
+     */
+    201: ServiceAccount;
+};
+
+export type CreateAdminServiceAccountResponse = CreateAdminServiceAccountResponses[keyof CreateAdminServiceAccountResponses];
+
+export type GetAdminServiceAccountData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/service-accounts/{id}';
+};
+
+export type GetAdminServiceAccountErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminServiceAccountError = GetAdminServiceAccountErrors[keyof GetAdminServiceAccountErrors];
+
+export type GetAdminServiceAccountResponses = {
+    /**
+     * Success
+     */
+    200: ServiceAccount;
+};
+
+export type GetAdminServiceAccountResponse = GetAdminServiceAccountResponses[keyof GetAdminServiceAccountResponses];
+
+export type UpdateAdminServiceAccountData = {
+    body: UpdateServiceAccount;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/service-accounts/{id}';
+};
+
+export type UpdateAdminServiceAccountErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateAdminServiceAccountError = UpdateAdminServiceAccountErrors[keyof UpdateAdminServiceAccountErrors];
+
+export type UpdateAdminServiceAccountResponses = {
+    /**
+     * Success
+     */
+    200: ServiceAccount;
+};
+
+export type UpdateAdminServiceAccountResponse = UpdateAdminServiceAccountResponses[keyof UpdateAdminServiceAccountResponses];
 
 export type ListAdminGrantsData = {
     body?: never;
@@ -1535,7 +1986,8 @@ export type ListAdminFlowsData = {
         sortOrder?: 'asc' | 'desc';
         workspaceId?: string;
         agentId?: string;
-        userId?: string;
+        consumerType?: 'user' | 'service_account';
+        consumerId?: string;
         resourceId?: string;
         purpose?: string;
     };
@@ -1831,7 +2283,9 @@ export type ListWorkspaceAgentsData = {
          */
         sortBy?: string;
         sortOrder?: 'asc' | 'desc';
-        userId?: string;
+        principalType?: 'user' | 'service_account';
+        principalId?: string;
+        createdBy?: string;
         status?: string;
         q?: string;
     };
@@ -1962,7 +2416,9 @@ export type ListWorkspaceEnrollmentKeysData = {
          */
         sortBy?: string;
         sortOrder?: 'asc' | 'desc';
+        serviceAccountId?: string;
         userId?: string;
+        createdBy?: string;
         revoked?: boolean;
     };
     url: '/v1/workspaces/{workspaceId}/enrollment-keys';
@@ -1985,33 +2441,6 @@ export type ListWorkspaceEnrollmentKeysResponses = {
 };
 
 export type ListWorkspaceEnrollmentKeysResponse = ListWorkspaceEnrollmentKeysResponses[keyof ListWorkspaceEnrollmentKeysResponses];
-
-export type CreateWorkspaceEnrollmentKeyData = {
-    body: CreateWorkspaceEnrollmentKey;
-    path: {
-        workspaceId: string;
-    };
-    query?: never;
-    url: '/v1/workspaces/{workspaceId}/enrollment-keys';
-};
-
-export type CreateWorkspaceEnrollmentKeyErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type CreateWorkspaceEnrollmentKeyError = CreateWorkspaceEnrollmentKeyErrors[keyof CreateWorkspaceEnrollmentKeyErrors];
-
-export type CreateWorkspaceEnrollmentKeyResponses = {
-    /**
-     * Success
-     */
-    201: CreatedEnrollmentKey;
-};
-
-export type CreateWorkspaceEnrollmentKeyResponse = CreateWorkspaceEnrollmentKeyResponses[keyof CreateWorkspaceEnrollmentKeyResponses];
 
 export type GetWorkspaceEnrollmentKeyData = {
     body?: never;
@@ -2068,6 +2497,155 @@ export type UpdateWorkspaceEnrollmentKeyResponses = {
 };
 
 export type UpdateWorkspaceEnrollmentKeyResponse = UpdateWorkspaceEnrollmentKeyResponses[keyof UpdateWorkspaceEnrollmentKeyResponses];
+
+export type ListWorkspaceServiceAccountsData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, createdAt, status. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        status?: 'active' | 'revoked';
+        createdBy?: string;
+        q?: string;
+    };
+    url: '/v1/workspaces/{workspaceId}/service-accounts';
+};
+
+export type ListWorkspaceServiceAccountsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceServiceAccountsError = ListWorkspaceServiceAccountsErrors[keyof ListWorkspaceServiceAccountsErrors];
+
+export type ListWorkspaceServiceAccountsResponses = {
+    /**
+     * Success
+     */
+    200: ServiceAccountsPage;
+};
+
+export type ListWorkspaceServiceAccountsResponse = ListWorkspaceServiceAccountsResponses[keyof ListWorkspaceServiceAccountsResponses];
+
+export type CreateWorkspaceServiceAccountData = {
+    body: CreateWorkspaceServiceAccount;
+    path: {
+        workspaceId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/service-accounts';
+};
+
+export type CreateWorkspaceServiceAccountErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateWorkspaceServiceAccountError = CreateWorkspaceServiceAccountErrors[keyof CreateWorkspaceServiceAccountErrors];
+
+export type CreateWorkspaceServiceAccountResponses = {
+    /**
+     * Success
+     */
+    201: ServiceAccount;
+};
+
+export type CreateWorkspaceServiceAccountResponse = CreateWorkspaceServiceAccountResponses[keyof CreateWorkspaceServiceAccountResponses];
+
+export type GetWorkspaceServiceAccountData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        serviceAccountId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/service-accounts/{serviceAccountId}';
+};
+
+export type GetWorkspaceServiceAccountErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceServiceAccountError = GetWorkspaceServiceAccountErrors[keyof GetWorkspaceServiceAccountErrors];
+
+export type GetWorkspaceServiceAccountResponses = {
+    /**
+     * Success
+     */
+    200: ServiceAccount;
+};
+
+export type GetWorkspaceServiceAccountResponse = GetWorkspaceServiceAccountResponses[keyof GetWorkspaceServiceAccountResponses];
+
+export type UpdateWorkspaceServiceAccountData = {
+    body: UpdateServiceAccount;
+    path: {
+        workspaceId: string;
+        serviceAccountId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/service-accounts/{serviceAccountId}';
+};
+
+export type UpdateWorkspaceServiceAccountErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateWorkspaceServiceAccountError = UpdateWorkspaceServiceAccountErrors[keyof UpdateWorkspaceServiceAccountErrors];
+
+export type UpdateWorkspaceServiceAccountResponses = {
+    /**
+     * Success
+     */
+    200: ServiceAccount;
+};
+
+export type UpdateWorkspaceServiceAccountResponse = UpdateWorkspaceServiceAccountResponses[keyof UpdateWorkspaceServiceAccountResponses];
+
+export type CreateServiceAccountEnrollmentKeyData = {
+    body: CreateServiceAccountEnrollmentKey;
+    path: {
+        workspaceId: string;
+        serviceAccountId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/service-accounts/{serviceAccountId}/enrollment-keys';
+};
+
+export type CreateServiceAccountEnrollmentKeyErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateServiceAccountEnrollmentKeyError = CreateServiceAccountEnrollmentKeyErrors[keyof CreateServiceAccountEnrollmentKeyErrors];
+
+export type CreateServiceAccountEnrollmentKeyResponses = {
+    /**
+     * Success
+     */
+    201: CreatedEnrollmentKey;
+};
+
+export type CreateServiceAccountEnrollmentKeyResponse = CreateServiceAccountEnrollmentKeyResponses[keyof CreateServiceAccountEnrollmentKeyResponses];
 
 export type ListWorkspaceGrantsData = {
     body?: never;
@@ -2271,7 +2849,8 @@ export type ListWorkspaceFlowsData = {
         sortBy?: string;
         sortOrder?: 'asc' | 'desc';
         agentId?: string;
-        userId?: string;
+        consumerType?: 'user' | 'service_account';
+        consumerId?: string;
         resourceId?: string;
         purpose?: string;
     };

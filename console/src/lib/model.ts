@@ -1,5 +1,5 @@
 import type { ConsoleView as State } from "./view";
-import type { Agent, Grant, Rule, User } from "@/api/generated";
+import type { Agent, Grant, Principal, Rule, User } from "@/api/generated";
 
 export type Tone = "good" | "warn" | "bad" | "muted" | "info";
 export type Health = { label: string; tone: Tone };
@@ -20,6 +20,7 @@ export function rows(state: State) {
     workspaces: state.workspaces ?? [],
     memberships: state.memberships ?? [],
     agents: state.agents ?? [],
+    serviceAccounts: state.serviceAccounts ?? [],
     services: state.services ?? [],
     egressRoutes: state.egressRoutes ?? [],
     grants: state.grants ?? [],
@@ -47,10 +48,20 @@ export function short(value?: string) {
 }
 export function name(
   state: State,
-  kind: "users" | "agents" | "workspaces",
+  kind: "users" | "agents" | "workspaces" | "serviceAccounts",
   id?: string,
 ) {
   return rows(state)[kind].find((item) => item.id === id)?.name || id || "—";
+}
+// A device runs as a person or as a Service Account; the label says which.
+export function principalName(state: State, p?: Principal) {
+  if (!p) return "—";
+  return p.type === "service_account"
+    ? `服务账号 · ${name(state, "serviceAccounts", p.id)}`
+    : name(state, "users", p.id);
+}
+export function isSelf(p: Principal | undefined, user: User) {
+  return p?.type === "user" && p.id === user.id;
 }
 export function resourceName(state: State, id: string) {
   const r = rows(state);
@@ -59,6 +70,7 @@ export function resourceName(state: State, id: string) {
       ...r.services,
       ...r.egressRoutes,
       ...r.agents,
+      ...r.serviceAccounts,
       ...r.workspaces,
       ...r.users,
     ].find((item) => item.id === id)?.name || short(id)
@@ -89,7 +101,9 @@ export function subjectName(state: State, g: Grant) {
     ? "匿名访问者"
     : g.subjectType === "workspace"
       ? `${name(state, "workspaces", g.subjectId)} 的成员`
-      : name(state, "users", g.subjectId);
+      : g.subjectType === "service_account"
+        ? `服务账号 · ${name(state, "serviceAccounts", g.subjectId)}`
+        : name(state, "users", g.subjectId);
 }
 export function canManage(state: State, user: User, workspace = "") {
   return (
@@ -99,15 +113,6 @@ export function canManage(state: State, user: User, workspace = "") {
         m.userId === user.id &&
         (!workspace || m.workspaceId === workspace) &&
         ["owner", "maintainer"].includes(m.role),
-    )
-  );
-}
-export function canEnroll(state: State, user: User, workspace = "") {
-  return (
-    user.admin ||
-    rows(state).memberships.some(
-      (m) =>
-        m.userId === user.id && (!workspace || m.workspaceId === workspace),
     )
   );
 }
@@ -131,7 +136,9 @@ export function canManageResource(
           m.userId === user.id &&
           m.role === "developer",
       ) &&
-      r.agents.some((a) => a.id === target.agentId && a.userId === user.id))
+      r.agents.some(
+        (a) => a.id === target.agentId && isSelf(a.principal, user),
+      ))
   );
 }
 export function canGrant(state: State, user: User, workspace = "") {

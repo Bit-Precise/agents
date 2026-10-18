@@ -32,7 +32,7 @@ func TestAutomaticEnrollmentThroughHTTPAPIAndSupervisor(t *testing.T) {
 	defer origin.Close()
 	cfg := h.agentConfig(w.Name, "provider")
 	cfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: origin.URL}}}
-	enrolled, client := h.enroll(cfg, w, u, []string{"serve"})
+	enrolled, client := h.enrollServiceAccount(cfg, w, []string{"serve"})
 	if enrolled.Agent.Status != api.StatusActive || len(enrolled.Credentials.Effective.Services) != 1 || enrolled.Credentials.Effective.Services[0].Hostname != serviceHost("demo", w.Name) {
 		t.Fatalf("validated enrollment was not effective immediately: %+v", enrolled.Agent)
 	}
@@ -159,7 +159,7 @@ func TestHTTPAPIPersistsRegistrationAcrossServerRestart(t *testing.T) {
 	w, u := h.workspace("workspace", "alice")
 	cfg := h.agentConfig(w.Name, "device")
 	cfg.Ingress = config.IngressConfig{Enabled: true, HTTP: config.ListenerConfig{Enabled: true, Listen: "127.0.0.1:18888"}, Routes: []policy.Rule{tlsRule("example.com")}, OnUnmatched: "reject"}
-	enrolled, _ := h.enroll(cfg, w, u, []string{"ingress"})
+	enrolled, _ := h.login(cfg, w, u)
 	address := h.cfg.ListenAddress
 	database := h.cfg.Database.DSN
 	h.close()
@@ -190,7 +190,7 @@ func TestResourceListsDoNotLeakOtherWorkspaceSessions(t *testing.T) {
 	enroll := func(w types.Workspace, u userCredential, name string) types.EnrollResponse {
 		cfg := h.agentConfig(w.Name, name)
 		cfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: origin.URL}}}
-		response, _ := h.enroll(cfg, w, u, []string{"serve"})
+		response, _ := h.login(cfg, w, u)
 		h.runAgent(cfg, response)
 		return response
 	}

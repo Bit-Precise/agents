@@ -20,5 +20,13 @@ No published-service hosts are routed yet. Add one wildcard per workspace
 SQLite is ephemeral: restarting the control Pod loses identities and policies.
 {{- end }}
 
+{{- if .Values.hydra.enabled }}
+`agentd login` uses Hydra at {{ .Values.hydra.publicURL }} (issuer paths only).
+Its Admin API {{ include "agents.fullname" . }}-hydra-admin:4445 must stay reachable by Control alone.
+{{- if eq .Values.hydra.database.type "memory" }}
+Hydra uses in-memory storage: restarts end pending registrations (evaluation only).
+{{- end }}
+{{- end }}
+
 Control and Edge are single replicas with Recreate updates. Existing flows are
 interrupted during upgrades; multiple Edge replicas are not supported.

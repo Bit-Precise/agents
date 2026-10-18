@@ -10,22 +10,27 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/config"
 	"github.com/bit-precise/agentd/controlclient"
+	"github.com/bit-precise/agentd/deviceflow"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agentd/supervisor"
 	"github.com/bit-precise/agents/control"
 	"github.com/bit-precise/agents/control/types"
 	"github.com/bit-precise/agents/edge"
 	"github.com/bit-precise/agents/internal/controlrpc"
+	"github.com/bit-precise/agents/internal/hydra/hydratest"
 	"github.com/rs/zerolog"
 )
 
@@ -40,7 +45,16 @@ type harness struct {
 	edgeBase     string
 	remoteStatus *controlrpc.Client
 	client       *http.Client
+	hydra        *hydratest.Server
 	closeOnce    sync.Once
+}
+
+// newHydra stands in for the instance's Hydra, pointed at Control's pages.
+func newHydra(t *testing.T, base string) (*hydratest.Server, control.HydraConfig) {
+	t.Helper()
+	fake := hydratest.New(hydratest.URLs{Login: base + "/oauth/login", Consent: base + "/oauth/consent", Verification: base + "/oauth/device", Success: base + "/oauth/device/done", Error: base + "/oauth/error"})
+	t.Cleanup(fake.Close)
+	return fake, control.HydraConfig{Enabled: true, PublicURL: fake.Issuer(), AdminURL: fake.Admin.URL}
 }
 
 func newHarness(t *testing.T) *harness {
@@ -57,6 +71,8 @@ func startHarness(t *testing.T, databasePath, listenAddress string) *harness {
 	_, port, _ := net.SplitHostPort(listener.Addr().String())
 	base := "http://localhost:" + port
 	cfg := control.Config{ListenAddress: listener.Addr().String(), ServerURL: base, EdgeURL: base + "/agent", StateDir: filepath.Dir(databasePath), DevelopmentHTTP: true}
+	fake, hydraConfig := newHydra(t, base)
+	cfg.Hydra = hydraConfig
 	cfg.Database.Type = "sqlite"
 	cfg.Database.DSN = databasePath
 	if err := cfg.Validate(); err != nil {
@@ -73,7 +89,7 @@ func startHarness(t *testing.T, databasePath, listenAddress string) *harness {
 	server.Listener = listener
 	server.Start()
 	client := &http.Client{Timeout: 8 * time.Second, Transport: &http.Transport{Proxy: nil}}
-	h := &harness{t: t, app: app, server: server, cfg: cfg, base: base, client: client}
+	h := &harness{t: t, app: app, server: server, cfg: cfg, base: base, client: client, hydra: fake}
 	t.Cleanup(h.close)
 	return h
 }
@@ -173,13 +189,138 @@ func (h *harness) workspace(name, userName string) (types.Workspace, userCredent
 	return w, u
 }
 
-func (h *harness) enroll(cfg *config.Config, w types.Workspace, u userCredential, roles []string) (types.EnrollResponse, *controlclient.Client) {
+// login registers a personal device as `agentd login` does: Device Flow with
+// the agentd client, the person confirming in a browser signed in with their
+// token (developmentHTTP), and the one-time exchange.
+func (h *harness) login(cfg *config.Config, w types.Workspace, u userCredential) (types.EnrollResponse, *controlclient.Client) {
 	h.t.Helper()
+	ctx := h.t.Context()
+	client, err := controlclient.New(cfg)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(client.Close)
+	info, err := client.Instance(ctx)
+	if err != nil || info.DeviceAuthorization == nil {
+		h.t.Fatalf("instance does not offer Device Flow: %+v %v", info, err)
+	}
+	flow := &deviceflow.Client{HTTP: client.HTTPClient(), Sleep: func(ctx context.Context, _ time.Duration) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+			return nil
+		}
+	}}
+	endpoints, err := flow.Discover(ctx, info.DeviceAuthorization.Issuer)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var authorization deviceflow.Authorization
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		// Control registers the device client in the background.
+		if authorization, err = flow.Start(ctx, endpoints.DeviceAuthorization, info.DeviceAuthorization.ClientID, info.DeviceAuthorization.Scope, info.DeviceAuthorization.Audience); err == nil || time.Now().After(deadline) {
+			break
+		}
+	}
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.confirmInBrowser(authorization, u, w.ID, api.Principal{Type: api.PrincipalUser, ID: u.User.ID})
+	token, err := flow.Poll(ctx, endpoints.Token, info.DeviceAuthorization.ClientID, authorization)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	response, err := client.ExchangeDeviceEnrollment(ctx, token.AccessToken)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := client.ExchangeDeviceEnrollment(ctx, token.AccessToken); err == nil {
+		h.t.Fatal("one Device Flow authorization registered a second device")
+	}
+	return response, client
+}
+
+// confirmInBrowser plays the person: type the code, sign in, choose, consent.
+func (h *harness) confirmInBrowser(authorization deviceflow.Authorization, u userCredential, workspaceID string, p api.Principal) {
+	h.t.Helper()
+	jar, _ := cookiejar.New(nil)
+	browser := &http.Client{Jar: jar, Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	defer browser.CloseIdleConnections()
+	send := func(method, target, contentType, csrf string, body io.Reader) *http.Response {
+		r, _ := http.NewRequestWithContext(h.t.Context(), method, target, body)
+		if contentType != "" {
+			r.Header.Set("Content-Type", contentType)
+			r.Header.Set("Origin", h.base)
+			r.Header.Set("X-CSRF-Token", csrf)
+		}
+		response, err := browser.Do(r)
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		return response
+	}
+	// follow stops at the Console page, which has nothing to redirect.
+	follow := func(target string) (*http.Response, *url.URL) {
+		for range 10 {
+			response := send("GET", target, "", "", nil)
+			next, err := response.Location()
+			if err != nil {
+				return response, response.Request.URL
+			}
+			response.Body.Close()
+			if next.Path == "/console/" {
+				return nil, next
+			}
+			target = next.String()
+		}
+		h.t.Fatal("redirect loop")
+		return nil, nil
+	}
+	encoded, _ := json.Marshal(map[string]string{"token": u.Token})
+	var session struct {
+		CSRF string `json:"csrfToken"`
+	}
+	response := send("POST", h.base+"/v1/sessions", "application/json", "", bytes.NewReader(encoded))
+	if err := json.Unmarshal([]byte(readResponse(h.t, response, 201)), &session); err != nil {
+		h.t.Fatal(err)
+	}
+	page, at := follow(authorization.VerificationURIComplete)
+	readResponse(h.t, page, 200)
+	form := url.Values{"device_challenge": {at.Query().Get("device_challenge")}, "user_code": {authorization.UserCode}}
+	response = send("POST", h.base+"/oauth/device", "application/x-www-form-urlencoded", "", strings.NewReader(form.Encode()))
+	location, err := response.Location()
+	if err != nil {
+		h.t.Fatalf("code page: %s", readResponse(h.t, response, 303))
+	}
+	response.Body.Close()
+	_, console := follow(location.String())
+	id := strings.TrimPrefix(console.Fragment, "device/")
+	encoded, _ = json.Marshal(map[string]any{"workspaceId": workspaceID, "principal": p})
+	response = send("POST", h.base+"/v1/device-authorizations/"+id+"/confirm", "application/json", session.CSRF, bytes.NewReader(encoded))
+	var accepted struct {
+		RedirectTo string `json:"redirectTo"`
+	}
+	if err := json.Unmarshal([]byte(readResponse(h.t, response, 200)), &accepted); err != nil {
+		h.t.Fatal(err)
+	}
+	done, _ := follow(accepted.RedirectTo)
+	if body := readResponse(h.t, done, 200); !strings.Contains(body, "设备已授权") {
+		h.t.Fatalf("browser did not finish the authorization: %s", body)
+	}
+}
+
+// enrollServiceAccount registers an unattended device with a one-use key of
+// a new Service Account limited to roles.
+func (h *harness) enrollServiceAccount(cfg *config.Config, w types.Workspace, roles []string) (types.EnrollResponse, *controlclient.Client) {
+	h.t.Helper()
+	var sa types.ServiceAccount
+	h.api("POST", "/v1/workspaces/"+w.ID+"/service-accounts", adminToken, map[string]any{"name": cfg.Agent.Name + "-sa"}, &sa, 201)
 	var key struct {
 		Key   types.EnrollmentKey `json:"key"`
 		Token string              `json:"token"`
 	}
-	h.api("POST", "/v1/admin/enrollment-keys", adminToken, map[string]any{"workspaceId": w.ID, "userId": u.User.ID, "roles": roles, "maxUses": 1, "expiresAt": time.Now().Add(time.Hour)}, &key, 201)
+	h.api("POST", "/v1/workspaces/"+w.ID+"/service-accounts/"+sa.ID+"/enrollment-keys", adminToken, map[string]any{"roles": roles, "maxUses": 1, "expiresAt": time.Now().Add(time.Hour)}, &key, 201)
 	client, err := controlclient.New(cfg)
 	if err != nil {
 		h.t.Fatal(err)

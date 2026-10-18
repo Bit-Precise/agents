@@ -64,8 +64,66 @@ database:
   bootstrapAdminSubjects: {{ $root.Values.oidc.bootstrapAdminSubjects | toJson }}
   adminEmails: {{ $root.Values.oidc.adminEmails | toJson }}
 {{ end -}}
+{{ if $root.Values.hydra.enabled }}hydra:
+  enabled: true
+  publicURL: {{ trimSuffix "/" $root.Values.hydra.publicURL | quote }}
+  adminURL: {{ printf "http://%s-hydra-admin:4445" $name | quote }}
+  clientId: {{ $root.Values.hydra.clientId | quote }}
+{{ with $root.Values.hydra.audience }}  audience: {{ . | quote }}
+{{ end }}{{ end -}}
 {{ else if eq .component "edge" -}}
 controlURL: {{ printf "http://%s-control:8080" $name | quote }}
 internalTokenFile: "/etc/agents/secrets/internal.token"
 {{ end -}}
+{{- end -}}
+
+{{- define "agents.hydraImage" -}}
+{{- $image := .Values.hydra.image -}}
+{{- if $image.digest -}}
+{{- printf "%s:%s@%s" $image.repository $image.tag $image.digest -}}
+{{- else -}}
+{{- printf "%s:%s" $image.repository $image.tag -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Hydra's configuration carries no secrets; DSN and system secrets are environment variables from the Secret. */}}
+{{- define "agents.hydraConfiguration" -}}
+{{- $server := trimSuffix "/" .Values.public.serverURL -}}
+serve:
+  public: {port: 4444}
+  admin: {port: 4445}
+urls:
+  self:
+    issuer: {{ trimSuffix "/" .Values.hydra.publicURL | quote }}
+  login: {{ printf "%s/oauth/login" $server | quote }}
+  consent: {{ printf "%s/oauth/consent" $server | quote }}
+  error: {{ printf "%s/oauth/error" $server | quote }}
+  device:
+    verification: {{ printf "%s/oauth/device" $server | quote }}
+    success: {{ printf "%s/oauth/device/done" $server | quote }}
+strategies:
+  access_token: opaque
+ttl:
+  device_user_code: 10m
+log:
+  level: info
+  format: json
+{{- end -}}
+
+{{/* Hydra's DSN and system secrets, for the server and its migration Job. */}}
+{{- define "agents.hydraEnvironment" -}}
+- name: DSN
+{{- if eq .Values.hydra.database.type "memory" }}
+  value: memory
+{{- else }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ default .Values.existingSecret .Values.hydra.existingSecret | quote }}
+      key: {{ .Values.hydra.secretKeys.dsn | quote }}
+{{- end }}
+- name: SECRETS_SYSTEM
+  valueFrom:
+    secretKeyRef:
+      name: {{ default .Values.existingSecret .Values.hydra.existingSecret | quote }}
+      key: {{ .Values.hydra.secretKeys.systemSecrets | quote }}
 {{- end -}}

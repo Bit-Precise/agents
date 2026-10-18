@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/connection"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agents/control/types"
@@ -152,7 +153,11 @@ func (e *Edge) ServeHTTP(w http.ResponseWriter, r *http.Request, userID string) 
 		http.Error(w, "service access denied", http.StatusForbidden)
 		return
 	}
-	f, finish, err := e.beginFlow(r.Context(), d, connection.PurposeServe, userID, host, r.Body, nil)
+	var consumer api.Principal
+	if userID != "" {
+		consumer = api.Principal{Type: api.PrincipalUser, ID: userID}
+	}
+	f, finish, err := e.beginFlow(r.Context(), d, connection.PurposeServe, consumer, host, r.Body, nil)
 	if err != nil {
 		if errors.Is(err, ErrUnavailable) {
 			http.Error(w, "provider unavailable", http.StatusServiceUnavailable)

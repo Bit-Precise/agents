@@ -362,14 +362,8 @@ func TestOIDCDiscoveryPKCEBrowserSessionSSOAndLogout(t *testing.T) {
 	if _, err = f.app.State.SetMembership(admin.UserID, workspace.ID, user.ID, "developer"); err != nil {
 		t.Fatal(err)
 	}
-	_, key, err := f.app.State.CreateEnrollmentKey(admin.UserID, types.EnrollmentKey{WorkspaceID: workspace.ID, UserID: user.ID, Roles: []string{"serve"}, MaxUses: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
 	desired := api.AgentSpec{Serve: api.ServeSpec{Enabled: true, Services: []api.ServiceSpec{{Name: "demo", Origin: "http://127.0.0.1:3000"}}}}
-	if _, err = f.app.State.Enroll(types.EnrollRequest{EnrollmentKey: key, Instance: f.cfg.ServerURL, Endpoint: f.cfg.EdgeURL, Workspace: "work", Name: "provider", Desired: desired}); err != nil {
-		t.Fatal(err)
-	}
+	enrollDevice(t, f.app.State, user.ID, workspace, "provider", desired)
 	serverURL, _ := url.Parse(f.cfg.ServerURL)
 	nonce := strings.Repeat("b", 64)
 	returnTo := "/auth/authorize?" + url.Values{"return_to": []string{"http://demo.work.localhost:" + serverURL.Port() + "/private"}, "state": []string{nonce}}.Encode()

@@ -242,6 +242,68 @@ class ChartTests(unittest.TestCase):
             with self.subTest(email=email):
                 render({"oidc": {"adminEmails": [email]}}, success=False)
 
+    def test_hydra_is_private_except_issuer_paths(self):
+        oidc = {"enabled": True, "issuer": "https://id.example.net", "clientId": "agents"}
+        self.assertFalse(any("hydra" in name for _, name in self.default))
+        values = {"oidc": oidc, "networkPolicy": {"enabled": True},
+                  "hydra": {"enabled": True, "publicURL": "https://auth.agents.example.com", "existingSecret": "hydra-credentials"}}
+        documents = render(values)
+        control = documents[("ConfigMap", "unit-agents-control-config")]
+        self.assertIn('publicURL: "https://auth.agents.example.com"', control)
+        self.assertIn('adminURL: "http://unit-agents-hydra-admin:4445"', control)
+        self.assertIn('clientId: "agentd"', control)
+        hydra = documents[("ConfigMap", "unit-agents-hydra-config")]
+        for expected in ('issuer: "https://auth.agents.example.com"', 'login: "https://agents.example.com/oauth/login"',
+                         'consent: "https://agents.example.com/oauth/consent"', 'verification: "https://agents.example.com/oauth/device"',
+                         'success: "https://agents.example.com/oauth/device/done"', "access_token: opaque"):
+            self.assertIn(expected, hydra)
+        self.assertNotIn("dsn", hydra.lower())
+        self.assertNotIn("secrets", hydra)
+        deployment = documents[("Deployment", "unit-agents-hydra")]
+        self.assertIn('image: "docker.io/oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9"', deployment)
+        self.assertIn('name: "hydra-credentials"', deployment)
+        self.assertIn("name: SECRETS_SYSTEM", deployment)
+        for expected in ("readOnlyRootFilesystem: true", "runAsNonRoot: true", "automountServiceAccountToken: false", "path: /health/ready"):
+            self.assertIn(expected, deployment)
+        migrate = documents[("Job", "unit-agents-hydra-migrate")]
+        self.assertIn("helm.sh/hook: pre-install,pre-upgrade", migrate)
+        self.assertIn('args: ["migrate", "sql", "up", "-e", "--yes"]', migrate)
+        for component in ("control", "edge", "console"):
+            self.assertNotIn("hydra-credentials", documents[("Deployment", f"unit-agents-{component}")])
+        # Only issuer paths are public; the Admin API Service is never routed.
+        ingress = documents[("Ingress", "unit-agents")]
+        blocks = dict(re.findall(r'(?ms)^    - host: "([^"]+)"\n(.*?)(?=^    - host:|\Z)', ingress))
+        auth = blocks["auth.agents.example.com"]
+        self.assertEqual(re.findall(r"(?m)^          - path: (\S+)$", auth),
+                         ["/.well-known/openid-configuration", "/oauth2/device/auth", "/oauth2/device/verify", "/oauth2/token"])
+        self.assertNotIn("hydra-admin", ingress)
+        self.assertNotIn("hydra", blocks["agents.example.com"])
+        policy = documents[("NetworkPolicy", "unit-agents-hydra")]
+        admin_rule = re.search(r"(?ms)- from:\n        - podSelector:.*?port: 4445", policy).group(0)
+        self.assertIn("app.kubernetes.io/component: control", admin_rule)
+        self.assertNotIn("namespaceSelector", admin_rule)
+        self.assertIn("port: 4445", documents[("NetworkPolicy", "unit-agents-control")])
+        self.assertIn("port: 5432", documents[("NetworkPolicy", "unit-agents-hydra-migrate")])
+        # Same-origin issuer: exact issuer paths ahead of Control's catch-all.
+        same = render({"oidc": oidc, "hydra": {"enabled": True, "publicURL": "https://agents.example.com", "audience": "urn:agents:prod:agent-enrollment"}})
+        ingress = same[("Ingress", "unit-agents")]
+        self.assertEqual(ingress.count('host: "agents.example.com"'), 1)
+        self.assertLess(ingress.index("/oauth2/token"), ingress.index("path: /\n"))
+        self.assertIn('audience: "urn:agents:prod:agent-enrollment"', same[("ConfigMap", "unit-agents-control-config")])
+        memory = render({"oidc": oidc, "hydra": {"enabled": True, "publicURL": "https://auth.agents.example.com", "database": {"type": "memory"}}})
+        self.assertNotIn(("Job", "unit-agents-hydra-migrate"), memory)
+        self.assertIn("value: memory", memory[("Deployment", "unit-agents-hydra")])
+        unpinned = render({"oidc": oidc, "hydra": {"enabled": True, "publicURL": "https://auth.agents.example.com", "image": {"repository": "registry.example/hydra", "tag": "v26.2.1", "digest": ""}}})
+        self.assertIn('image: "registry.example/hydra:v26.2.1"', unpinned[("Deployment", "unit-agents-hydra")])
+        for invalid in ({"hydra": {"enabled": True, "publicURL": "https://auth.agents.example.com"}},
+                        {"oidc": oidc, "hydra": {"enabled": True}},
+                        {"oidc": oidc, "hydra": {"enabled": True, "publicURL": "http://auth.agents.example.com"}},
+                        {"oidc": oidc, "hydra": {"enabled": True, "publicURL": "https://auth.agents.example.com/hydra"}},
+                        {"oidc": oidc, "hydra": {"enabled": True, "publicURL": "https://auth.agents.example.com", "database": {"type": "memory"}, "replicaCount": 2}},
+                        {"oidc": oidc, "hydra": {"enabled": True, "publicURL": "https://auth.agents.example.com", "adminURL": "http://elsewhere"}}):
+            with self.subTest(values=invalid):
+                render(invalid, success=False)
+
     def test_existing_service_account_and_unknown_fields(self):
         documents = render({"serviceAccount": {"create": False, "name": "operator-account"}})
         self.assertFalse(any(kind == "ServiceAccount" for kind, _ in documents))
