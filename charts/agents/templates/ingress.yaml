@@ -1,8 +1,8 @@
 {{- if .Values.ingress.enabled }}
 {{- $root := . }}
 {{- $name := include "agents.fullname" . }}
-{{- $controlHost := (urlParse .Values.public.serverURL).host }}
-{{- $edgeHost := (urlParse .Values.public.edgeURL).host }}
+{{- $controlHost := (urlParse .Values.public.serverURL).hostname }}
+{{- $edgeHost := (urlParse .Values.public.edgeURL).hostname }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

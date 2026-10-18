@@ -51,13 +51,15 @@
       "properties": {
         "serverURL": {
           "type": "string",
-          "pattern": "^https://[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*/?$",
-          "maxLength": 262
+          "pattern": "^https://[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?/?$",
+          "maxLength": 268,
+          "description": "HTTPS URL with an optional explicit port from 1 to 65535, without leading zeros."
         },
         "edgeURL": {
           "type": "string",
-          "pattern": "^https://[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*/agent$",
-          "maxLength": 268
+          "pattern": "^https://[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?/agent$",
+          "maxLength": 274,
+          "description": "HTTPS URL with an optional explicit port from 1 to 65535, without leading zeros."
         }
       },
       "additionalProperties": false,

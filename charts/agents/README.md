@@ -50,6 +50,10 @@ ingress:
       hosts: ["*.workspace1.agents.example.com"]
 ```
 
+如果入口使用非标准 HTTPS 端口，例如 `30526`，将两个公开 URL 配置为 `https://agents.example.com:30526` 和 `https://connect.agents.example.com:30526/agent`。端口使用 `1–65535` 的十进制整数，不带前导零；省略时使用 HTTPS 默认端口 443。服务 URL 必须使用与控制台相同的公开端口，浏览器 SSO 不允许跨端口兑换。OIDC callback 自动保留这个端口。
+
+`ingress.serviceHosts`、Ingress/TLS 的 host 仍只填写 DNS 名，不带端口。Chart 不创建入口监听器或 NodePort；外部 Istio Gateway 等入口须提供所配置的公开端口，并保留完整 Host/authority。复用已有 Gateway 时可设置 `ingress.enabled: false`，由部署仓库配置分流。
+
 这些 TLS Secret 必须已经存在。Controller 注解依具体实现而异；示例仅适用于 ingress-nginx。无 `ingress.tls` 时依赖 Controller 的默认证书，chart 不申请证书，也不保证默认配置的示例域名可访问。
 
 `*.agents.example.com` 不覆盖 `demo.workspace1.agents.example.com`。每个 Workspace 配置独立的一层 wildcard，或列出 `demo.workspace1.agents.example.com` 这样的精确服务名。创建新 Workspace 后，还需要更新 DNS、Ingress 和证书覆盖范围。wildcard 本身不授予资源访问权限。
@@ -62,8 +66,8 @@ ingress:
 |---|---|
 | `existingSecret` | `agents-credentials`；chart 从不生成 Secret |
 | `secretKeys.*` | 映射现有 Secret 的 admin/internal/PostgreSQL 键 |
-| `public.serverURL` | 公网 HTTPS 控制台 origin，无非标准端口 |
-| `public.edgeURL` | 公网 HTTPS `/agent`；可以和控制台共用 host |
+| `public.serverURL` | 公网 HTTPS 控制台 origin，可含显式端口 `1–65535` |
+| `public.edgeURL` | 公网 HTTPS `/agent`，可含显式端口；可以和控制台共用 host |
 | `image.tag` | 空值采用 `Chart.appVersion` |
 | `image.pullPolicy` / `imagePullSecrets` | `IfNotPresent` / `[]` |
 | `control.image.repository` / `edge.image.repository` / `console.image.repository` | 各组件独立 GHCR 镜像 |

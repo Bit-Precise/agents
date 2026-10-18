@@ -151,6 +151,51 @@ class ChartTests(unittest.TestCase):
         self.assertIn("name: unit-agents-edge", ingress)
         self.assertIn("name: unit-agents-control", ingress)
 
+    def test_explicit_https_port_preserves_authority_but_not_ingress_host(self):
+        values = {"public": {"serverURL": "https://agents.example.com:30526/",
+                             "edgeURL": "https://connect.agents.example.com:30526/agent"},
+                  "ingress": {"serviceHosts": ["*.demo.agents.example.com", "hello.other.agents.example.com"]},
+                  "oidc": {"enabled": True, "issuer": "https://id.example.net", "clientId": "agents"}}
+        documents = render(values)
+        for component in ("control", "edge", "console"):
+            configuration = documents[("ConfigMap", f"unit-agents-{component}-config")]
+            self.assertIn('serverURL: "https://agents.example.com:30526"', configuration)
+            self.assertIn('edgeURL: "https://connect.agents.example.com:30526/agent"', configuration)
+        control = documents[("ConfigMap", "unit-agents-control-config")]
+        self.assertIn('redirectURL: "https://agents.example.com:30526/auth/oidc/callback"', control)
+        ingress = documents[("Ingress", "unit-agents")]
+        hosts = re.findall(r'(?m)^    - host: "([^\"]+)"$', ingress)
+        self.assertEqual(hosts, ["agents.example.com", "connect.agents.example.com",
+                                 "*.demo.agents.example.com", "hello.other.agents.example.com"])
+        # External Gateways still need full authorities for Host/SSO checks.
+        values["ingress"]["enabled"] = False
+        external = render(values)
+        self.assertNotIn(("Ingress", "unit-agents"), external)
+        self.assertIn(':30526/auth/oidc/callback', external[("ConfigMap", "unit-agents-control-config")])
+
+    def test_explicit_port_bounds_and_same_hostname_routing(self):
+        for port in (1, 443, 9999, 10000, 59999, 60000, 64999, 65000, 65499, 65500, 65529, 65530, 65535):
+            with self.subTest(port=port):
+                documents = render({"public": {"serverURL": f"https://agents.example.com:{port}",
+                                                "edgeURL": f"https://agents.example.com:{port}/agent"}})
+                ingress = documents[("Ingress", "unit-agents")]
+                self.assertEqual(ingress.count('host: "agents.example.com"'), 1)
+                self.assertIn("path: /agent", ingress)
+                self.assertIn("name: unit-agents-edge", ingress)
+                self.assertIn("name: unit-agents-control", ingress)
+        for port in ("", "0", "00", "0443", "65536", "65599", "65600", "99999", "100000", "-1", "+443", "https", "443.0"):
+            for name, suffix in (("serverURL", ""), ("edgeURL", "/agent")):
+                with self.subTest(field=name, invalid_port=port):
+                    render({"public": {name: f"https://agents.example.com:{port}{suffix}"}}, success=False)
+
+    def test_service_domain_validation_remains_strict_with_public_port(self):
+        for host in ("*.agents.example.com", "*.*.agents.example.com", "*.one.two.agents.example.com",
+                     "*.demo.other.example", "hello.demo.agents.example.com:30526"):
+            with self.subTest(host=host):
+                render({"public": {"serverURL": "https://agents.example.com:30526"},
+                        "ingress": {"serviceHosts": [host]}}, success=False)
+        render({"public": {"serverURL": "https://127.0.0.1:30526"}}, success=False)
+
     def test_security_and_process_probes(self):
         for (kind, name), text in self.default.items():
             if kind != "Deployment":
