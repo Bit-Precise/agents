@@ -2,7 +2,7 @@
 
 本 chart 将服务端拆为 Control、Edge 和 Console 三个进程、三个镜像、三个 Deployment。它使用当前的单 Control、单 Edge 状态模型；PostgreSQL 或多个 Console 副本不会让 Control/Edge 自动具备高可用能力。
 
-后续 [身份与 Device Flow 设计](identity-and-device-flow.md) 将增加独立 Hydra、数据库、迁移/设备 client 初始化和受保护的 Admin API。该部分尚未进入当前 chart；以下是现有版本部署参数，不要将设计中的 Hydra 参数当作已支持 values。
+后续 [身份与 Device Flow 设计](identity-and-device-flow.md) 将增加独立 Hydra、数据库、迁移/设备 client 初始化和受保护的 Admin API，并取消接入及配置变更的人工审批。该部分尚未进入当前 chart；以下审批相关描述与部署参数均为现有版本行为，不要将设计中的 Hydra 参数当作已支持 values。
 
 ```mermaid
 flowchart LR

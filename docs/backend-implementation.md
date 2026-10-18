@@ -2,7 +2,7 @@
 
 本文件描述独立 agents 仓库中的实现。Control、Edge、Console 可分别运行；持久状态与连接目录仍分别由一个 Control 和一个 Edge 拥有。`agents serve` 保留单进程开发模式。长期设计见 agentd 仓库的 `docs/agents-agentd-architecture.md`。
 
-2026-10-18 身份设计修订：目标模型为 Workspace-owned Agent + 唯一 User/ServiceAccount 主体，并引入 Hydra Device Flow。该变更尚未实现；本文件下述 User 绑定、注册密钥、Token 和 DB v2 描述是迁移前的代码事实，不是继续扩展的目标模型。新实现应遵循 [身份与 Device Flow 设计](identity-and-device-flow.md)，不能只移除 Console 的用户选择字段而保留后端隐式 User 绑定。
+2026-10-18 身份设计修订：目标模型为 Workspace-owned Agent + 唯一 User/ServiceAccount 主体，并引入 Hydra Device Flow，接入和配置变更均取消人工审批，改为权限/策略自动校验。该变更尚未实现；本文件下述 User 绑定、`Approval`、`pendingApproval`、`/approval`、注册密钥、Token 和 DB v2 描述是迁移前的代码事实，不是继续扩展的目标模型。新实现应遵循 [身份与 Device Flow 设计](identity-and-device-flow.md)，不能只改表单或把旧审批流程换一个名称。
 
 ## 对照 Headscale 的职责分层
 

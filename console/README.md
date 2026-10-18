@@ -2,7 +2,7 @@
 
 管理界面使用 React、TypeScript、Vite 和 Tailwind CSS。需要 Node.js 22.12 或更新版本，仓库推荐 Node.js 24；依赖版本与完整性固定在 `package-lock.json`。
 
-下一版的 SA 管理、Device Flow Workspace/身份选择及注册密钥表单调整见 [身份设计](../docs/identity-and-device-flow.md)。这些是待实现页面；当前注册密钥仍按旧 User 绑定模型工作。SA 不能建立 Console 会话的限制必须由后端执行，不能只靠页面隐藏。
+下一版的 SA 管理、Device Flow Workspace/身份选择及注册密钥表单调整见 [身份设计](../docs/identity-and-device-flow.md)。目标取消人工审批，移除待审批队列、设备批准按钮和 autoApprove 选项，展示自动校验结果、生效配置及连接/同步状态。这些是待实现页面；当前仍按旧 User 绑定与批准模型工作。SA 不能建立 Console 会话的限制必须由后端执行，不能只靠页面隐藏。
 
 从本目录执行：
 
