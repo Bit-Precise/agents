@@ -4,6 +4,10 @@ set -euo pipefail
 : "${GH_TOKEN:?GitHub release token required}"
 [[ "$RELEASE_TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]] || { echo 'Expected a semantic vX.Y.Z tag' >&2; exit 1; }
 chart_version=${BASH_REMATCH[1]}
+release_flags=(--verify-tag)
+if [[ "$chart_version" == *-* ]]; then
+  release_flags+=(--prerelease --latest=false)
+fi
 work=$(mktemp -d)
 trap 'rm -r "$work"' EXIT
 curl --fail --location --retry 3 --output "$work/helm-v4.3.1-linux-amd64.tar.gz" https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz
@@ -29,5 +33,5 @@ BODY
 if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
   gh release upload "$RELEASE_TAG" "dist/agents-$chart_version.tgz" dist/IMAGES dist/SHA256SUMS --clobber
 else
-  gh release create "$RELEASE_TAG" "dist/agents-$chart_version.tgz" dist/IMAGES dist/SHA256SUMS --verify-tag --title "agents $RELEASE_TAG" --notes-file "$work/release.md"
+  gh release create "$RELEASE_TAG" "dist/agents-$chart_version.tgz" dist/IMAGES dist/SHA256SUMS "${release_flags[@]}" --title "agents $RELEASE_TAG" --notes-file "$work/release.md"
 fi
