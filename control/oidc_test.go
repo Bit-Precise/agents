@@ -301,7 +301,8 @@ func TestOIDCDiscoveryPKCEBrowserSessionSSOAndLogout(t *testing.T) {
 	if json.Unmarshal(data, &info) != nil || !info.OIDC.Enabled || info.OIDC.LoginURL != "/auth/oidc/login" || strings.Contains(string(data), oidcTestSecret) {
 		t.Fatal("invalid public OIDC capabilities")
 	}
-	attempt := f.begin(testOIDCProfile{Subject: "alice-sub", Name: "Alice", Email: "alice@example.test"}, "")
+	// The Console login button explicitly sends its canonical return path.
+	attempt := f.begin(testOIDCProfile{Subject: "alice-sub", Name: "Alice", Email: "alice@example.test"}, "/console/")
 	response = f.finish(attempt, 303)
 	if response.Header.Get("Location") != "/console/" {
 		t.Fatal("unexpected post-login redirect")
@@ -425,7 +426,11 @@ func TestOIDCRejectsReplayWrongBrowserAndInvalidTokens(t *testing.T) {
 			f.read(response, 403)
 		})
 	}
-	for _, target := range []string{"https://evil.test/", "//evil.test/", "/console/", "/auth/authorizeevil?x=1", "/auth/%61uthorize?x=1"} {
+	for _, target := range []string{
+		"https://evil.test/", "//evil.test/", "/console//evil.test/", "/console/../auth/authorize?x=1",
+		"/console/?returnTo=https://evil.test/", "/console/#evil", "/%63onsole/", "/console%2f",
+		"/auth/authorizeevil?x=1", "/auth/%61uthorize?x=1",
+	} {
 		response, err := f.client.Get(f.cfg.ServerURL + "/auth/oidc/login?returnTo=" + url.QueryEscape(target))
 		if err != nil {
 			t.Fatal(err)

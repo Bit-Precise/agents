@@ -85,7 +85,8 @@ func newOIDC(ctx context.Context, cfg Config) (*oidcAuth, error) {
 }
 
 func safeOIDCReturnTo(value string) (string, bool) {
-	if value == "" {
+	// The Console sends this exact path explicitly; omitted targets use it too.
+	if value == "" || value == "/console/" {
 		return "/console/", true
 	}
 	if len(value) > 8192 {
