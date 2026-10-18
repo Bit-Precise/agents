@@ -533,6 +533,14 @@ func solePersonalWorkspace(snap *types.Snapshot, workspaceID, userID string) boo
 	return count == 1
 }
 
+// CreateWorkspace lets any active person start a Workspace and become its
+// owner. Workspace names are a global DNS namespace, so people other than
+// instance admins may own a bounded number and cannot take the reserved
+// personal-<userID> names.
+// MaxOwnedWorkspaces bounds how many Workspaces a person who is not an
+// instance admin may own, including their personal one.
+const MaxOwnedWorkspaces = 20
+
 func (s *State) CreateWorkspace(actorID, name string) (types.Workspace, error) {
 	var out types.Workspace
 	name, err := label(name)
@@ -540,8 +548,23 @@ func (s *State) CreateWorkspace(actorID, name string) (types.Workspace, error) {
 		return out, err
 	}
 	err = s.mutate(func(snap *types.Snapshot) error {
-		if err := requireAdmin(snap, actorID); err != nil {
+		actor, err := requireUser(snap, actorID)
+		if err != nil {
 			return err
+		}
+		if !actor.Admin {
+			if strings.HasPrefix(name, "personal-") {
+				return problem(types.KindInvalid, "workspace names starting with personal- are reserved")
+			}
+			owned := 0
+			for _, m := range snap.Memberships {
+				if m.UserID == actorID && m.Role == "owner" {
+					owned++
+				}
+			}
+			if owned >= MaxOwnedWorkspaces {
+				return problem(types.KindForbidden, "workspace limit reached; ask an administrator for more")
+			}
 		}
 		if workspace(snap, name) != nil {
 			return problem(types.KindConflict, "workspace already exists")

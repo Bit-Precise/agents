@@ -269,7 +269,7 @@ func (h *harness) confirmInBrowser(authorization deviceflow.Authorization, u use
 				return response, response.Request.URL
 			}
 			response.Body.Close()
-			if next.Path == "/console/" {
+			if strings.HasPrefix(next.Path, "/device/") {
 				return nil, next
 			}
 			target = next.String()
@@ -295,7 +295,7 @@ func (h *harness) confirmInBrowser(authorization deviceflow.Authorization, u use
 	}
 	response.Body.Close()
 	_, console := follow(location.String())
-	id := strings.TrimPrefix(console.Fragment, "device/")
+	id := strings.TrimPrefix(console.Path, "/device/")
 	encoded, _ = json.Marshal(map[string]any{"workspaceId": workspaceID, "principal": p})
 	response = send("POST", h.base+"/v1/device-authorizations/"+id+"/confirm", "application/json", session.CSRF, bytes.NewReader(encoded))
 	var accepted struct {

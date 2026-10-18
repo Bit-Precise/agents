@@ -10,9 +10,14 @@ import (
 	"github.com/bit-precise/agentd/policy"
 )
 
+// User is a person. Email and Picture are display data refreshed from the
+// upstream IdP at each SSO login (email only when verified); identity is the
+// OIDC issuer and subject, never these fields.
 type User struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
+	Email     string    `json:"email,omitempty"`
+	Picture   string    `json:"picture,omitempty"`
 	Admin     bool      `json:"admin"`
 	Disabled  bool      `json:"disabled"`
 	CreatedAt time.Time `json:"createdAt"`

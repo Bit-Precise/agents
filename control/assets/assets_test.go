@@ -16,7 +16,7 @@ func TestConsoleRoutesAndSecurityHeaders(t *testing.T) {
 		{"/", "text/html", "agents · 控制台"},
 		{"/agents", "text/html", `id="root"`},
 		{"/assets/app.js", "text/javascript", "X-CSRF-Token"},
-		{"/assets/styles.css", "text/css", ".sidebar"},
+		{"/assets/styles.css", "text/css", ".bg-sidebar"},
 	} {
 		t.Run(test.path, func(t *testing.T) {
 			response := httptest.NewRecorder()

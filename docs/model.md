@@ -11,8 +11,8 @@
 
 | 规范名 | 代码 | 归属与持久化 | 要点 |
 |---|---|---|---|
-| User | `types.User` | 实例级；表 `users` | 身份唯一键是 OIDC `(issuer, subject)`，存于 `OIDCIdentity`。`Admin` 即 instance admin；对邮件名单管理的用户，`Admin` 由 `AdminFromEmail` 派生。停用是单向操作 |
-| Workspace | `types.Workspace` | 表 `workspaces` | 名称是不可变的 DNS label。新用户自动获得 `personal-<userID>` |
+| User | `types.User` | 实例级；表 `users` | 身份唯一键是 OIDC `(issuer, subject)`，存于 `OIDCIdentity`。`Email`（仅已验证）与 `Picture`（仅 HTTPS）是每次 SSO 登录刷新的展示数据，不参与身份识别。`Admin` 即 instance admin；对邮件名单管理的用户，`Admin` 由 `AdminFromEmail` 派生。停用是单向操作 |
+| Workspace | `types.Workspace` | 表 `workspaces` | 名称是不可变的 DNS label。新用户自动获得 `personal-<userID>`；任何用户都可以再创建 Workspace 并成为 owner（实例管理员以外最多拥有 20 个，`personal-` 前缀保留） |
 | Membership | `types.Membership` | `(workspace, user)` 复合主键 | 角色为 `owner / maintainer / developer / guest`。删除即退出 Workspace，并级联撤销设备 |
 | Service Account | `types.ServiceAccount` | 固定属于一个 Workspace；表 `service_accounts`，Workspace 内名称唯一 | 机器主体，不登录 Console，没有 user Token。名称和归属创建后不变，只能修改说明。由 maintainer/owner 或 instance admin 管理；撤销是终态 |
 | Agent | `types.Agent`（持久记录）、`api.Agent`（API 视图） | Workspace 内名称唯一；主体 `Principal` 恰为一个 User 或一个同 Workspace 的 Service Account | `Principal`（`{type: user\|service_account, id}`）、`CreatedBy`（注册操作人，只用于展示和审计，从不参与权限判断）、`Status`、`Roles`（角色上限）、`Desired`（AgentSpec）、`Effective`（EffectiveConfig）、`LastRejection`、`RevokedAt`。设计文档称之为 AgentRegistration |

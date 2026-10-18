@@ -16,6 +16,8 @@ type OIDCUserOptions struct {
 	BootstrapAdmin bool
 	VerifiedEmail  string
 	EmailAdmin     bool
+	// Picture is the IdP's avatar URL, already checked to be HTTPS.
+	Picture string
 }
 
 // OIDCUser binds identity only by issuer/subject, never by email or display name.
@@ -37,6 +39,7 @@ func (s *State) OIDCUser(issuer, subject, displayName string, opts OIDCUserOptio
 					return err
 				}
 				identity.VerifiedEmail = opts.VerifiedEmail
+				u.Email, u.Picture = opts.VerifiedEmail, opts.Picture
 				wasAdmin := u.Admin
 				if identity.AdminFromEmail {
 					identity.AdminFromEmail = opts.EmailAdmin
@@ -77,7 +80,7 @@ func (s *State) OIDCUser(issuer, subject, displayName string, opts OIDCUserOptio
 			}
 			name = original + " (" + randomID()[:12] + ")"
 		}
-		result = types.User{ID: id, Name: name, Admin: opts.BootstrapAdmin || opts.EmailAdmin, CreatedAt: time.Now().UTC()}
+		result = types.User{ID: id, Name: name, Email: opts.VerifiedEmail, Picture: opts.Picture, Admin: opts.BootstrapAdmin || opts.EmailAdmin, CreatedAt: time.Now().UTC()}
 		snap.Users = append(snap.Users, result)
 		if err := createPersonalWorkspace(snap, result, id); err != nil {
 			return err

@@ -51,7 +51,7 @@ func TestOIDCEmailAdminPersistsAndStartupRevokesExistingCredential(t *testing.T)
 	if err != nil || oldIdentity.UserID != u.ID {
 		t.Fatal("policy downgrade unnecessarily revoked the ordinary user credential")
 	}
-	_, err = again.CreateWorkspace(oldIdentity.UserID, "must-not-create")
+	_, _, err = again.CreateUser(oldIdentity.UserID, "must-not-create", false)
 	requireKind(t, err, types.KindForbidden)
 	personalWorkspace(t, again, current)
 	before = again.Revision()
@@ -150,7 +150,7 @@ func TestLastEmailAdministratorLosesPrivilegesWithoutRevocationRollback(t *testi
 			if err != nil {
 				t.Fatal("ordinary user credential should remain valid")
 			}
-			_, err = s.CreateWorkspace(identity.UserID, "forbidden-after-downgrade")
+			_, _, err = s.CreateUser(identity.UserID, "forbidden-after-downgrade", false)
 			requireKind(t, err, types.KindForbidden)
 			personalWorkspace(t, s, u)
 			stored, err := s.store.Load(t.Context())

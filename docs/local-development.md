@@ -15,14 +15,14 @@ bin/agents init --config .run/agents.yaml
 bin/agents serve --config .run/agents.yaml
 ```
 
-Windows 使用对应 `.exe`。默认控制台为 `http://localhost:8080/console/`，接入端点为 `http://localhost:8080/agent`；管理员 Token 位于 `.run/state/agents/admin.token`，SQLite 位于同目录的 `agents.db`。
+Windows 使用对应 `.exe`。默认控制台为 `http://localhost:8080/`（页面地址即路由，例如 `/workspaces/<id>/agents`，实例管理员页面在 `/admin/...`），接入端点为 `http://localhost:8080/agent`；管理员 Token 位于 `.run/state/agents/admin.token`，SQLite 位于同目录的 `agents.db`。
 
 `init` 只输出文件位置，不显示 Token、不覆盖已有配置或密钥。只在自己的终端/编辑器中查看 Token 并登录，不把它放进 URL、命令参数、截图或工单。管理员不隐式绕过业务授权。
 
-在控制台创建 `demo` Workspace；创建者自动成为该 Workspace 的 owner。设备有两种注册方式，都没有人工审批步骤：
+在侧边栏顶部的工作空间菜单中创建 `demo` Workspace；任何用户都可以创建，创建者自动成为 owner（实例管理员以外的用户最多拥有 20 个，`personal-` 前缀保留给个人空间）。设备有两种注册方式，都没有人工审批步骤：
 
 - **个人设备**用 `agentd login`：在浏览器里登录，确认 Workspace，并选择以自己还是以服务账号运行。需要本机 Hydra（下一小节）。
-- **无人值守设备**用服务账号的注册密钥：在“权限与成员 → 服务账号”创建服务账号（例如 `local-runner`），点“注册密钥”，选择 `ingress/serve/egress` 并设定有限期限与一次使用。密钥的角色就是该设备可启用角色的上限，完整密钥仅展示一次，可下载为文件。把它保存为 `.run/state/agents/demo.enrollment.key`。该目录由 init 建立为私有目录。Linux/macOS 文件权限设为 0600；Windows 要求仅当前账号、SYSTEM/Administrators 的私有 DACL，不能靠 Unix chmod mode 替代。
+- **无人值守设备**用服务账号的注册密钥：在“成员管理 → 服务账号”创建服务账号（例如 `local-runner`），在其操作菜单中点“创建注册密钥”，选择 `ingress/serve/egress` 并设定有限期限与一次使用。密钥的角色就是该设备可启用角色的上限，完整密钥仅展示一次，可下载为文件。把它保存为 `.run/state/agents/demo.enrollment.key`。该目录由 init 建立为私有目录。Linux/macOS 文件权限设为 0600；Windows 要求仅当前账号、SYSTEM/Administrators 的私有 DACL，不能靠 Unix chmod mode 替代。
 
 ### 本机 Hydra（`agentd login` 需要）
 

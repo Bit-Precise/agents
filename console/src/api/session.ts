@@ -19,6 +19,12 @@ client.interceptors.request.use((request) => {
   return request;
 });
 
+// An expired or revoked session ends at the sign-in page.
+let unauthorized: () => void = () => {};
+export function onUnauthorized(handler: () => void) {
+  unauthorized = handler;
+}
+
 export class APIFailure extends Error {
   constructor(
     message: string,
@@ -42,10 +48,9 @@ export function result<T>(response: {
       typeof detail?.error === "string"
         ? detail.error
         : detail?.error?.message || detail?.message;
-    throw new APIFailure(
-      message || "请求未完成，请检查连接后重试。",
-      response.response?.status || 0,
-    );
+    const status = response.response?.status || 0;
+    if (status === 401) unauthorized();
+    throw new APIFailure(message || "请求未完成，请检查连接后重试。", status);
   }
   return response.data as T;
 }

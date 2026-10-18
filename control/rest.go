@@ -203,6 +203,7 @@ func (a *App) registerREST() {
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/memberships/{userId}", a.restRead("memberships", false))
 	m.HandleFunc("POST /v1/admin/users", a.restCreate("users", true))
 	m.HandleFunc("POST /v1/admin/workspaces", a.restCreate("workspaces", true))
+	m.HandleFunc("POST /v1/workspaces", a.restCreate("workspaces", false))
 	m.HandleFunc("POST /v1/admin/service-accounts", a.restCreate("service-accounts", true))
 	m.HandleFunc("POST /v1/admin/routes", a.restCreate("routes", true))
 	m.HandleFunc("POST /v1/admin/grants", a.restCreate("grants", true))

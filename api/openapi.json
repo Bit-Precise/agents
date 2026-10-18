@@ -1215,6 +1215,54 @@
             }
           }
         ]
+      },
+      "post": {
+        "operationId": "createWorkspace",
+        "tags": [
+          "Management"
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Created resource URL",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkspace"
+              }
+            }
+          }
+        },
+        "description": "Any active user may create a Workspace and becomes its owner. People who are not instance administrators own at most 20 Workspaces and cannot use names starting with personal-."
       }
     },
     "/v1/admin/workspaces": {
@@ -6303,6 +6351,14 @@
           },
           "name": {
             "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "description": "Verified email from the last SSO login."
+          },
+          "picture": {
+            "type": "string",
+            "description": "HTTPS avatar URL from the last SSO login."
           },
           "admin": {
             "type": "boolean"

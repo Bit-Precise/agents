@@ -760,3 +760,37 @@ func TestEnrollmentPreissuesOnlyPermittedRoleTokens(t *testing.T) {
 		t.Fatal("revoked platform token forgotten")
 	}
 }
+
+func TestPeopleCreateBoundedWorkspacesTheyOwn(t *testing.T) {
+	f := setup(t)
+	w, err := f.s.CreateWorkspace(f.user.ID, "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := member(&f.s.snapshot, w.ID, f.user.ID); m == nil || m.Role != "owner" {
+		t.Fatalf("creator is not the owner: %+v", m)
+	}
+	if _, err = f.s.CreateWorkspace(f.user.ID, "personal-someone"); types.KindOf(err) != string(types.KindInvalid) {
+		t.Fatalf("a reserved personal name was taken: %v", err)
+	}
+	if _, err = f.s.CreateWorkspace(f.user.ID, "team"); types.KindOf(err) != string(types.KindConflict) {
+		t.Fatalf("a taken name was accepted: %v", err)
+	}
+	owned := 0
+	for _, m := range f.s.snapshot.Memberships {
+		if m.UserID == f.user.ID && m.Role == "owner" {
+			owned++
+		}
+	}
+	for i := owned; i < MaxOwnedWorkspaces; i++ {
+		if _, err = f.s.CreateWorkspace(f.user.ID, fmt.Sprintf("team-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = f.s.CreateWorkspace(f.user.ID, "one-too-many"); types.KindOf(err) != string(types.KindForbidden) {
+		t.Fatalf("the workspace limit was not enforced: %v", err)
+	}
+	if _, err = f.s.CreateWorkspace(f.admin.ID, "admin-unbounded"); err != nil {
+		t.Fatalf("an administrator was limited: %v", err)
+	}
+}

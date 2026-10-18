@@ -111,7 +111,7 @@ func follow(t *testing.T, client *http.Client, target string) (*http.Response, s
 		if err != nil {
 			t.Fatal(err)
 		}
-		if next.Path == "/console/" || next.Path == "/auth/oidc/login" {
+		if strings.HasPrefix(next.Path, "/device/") || next.Path == "/login" || next.Path == "/auth/oidc/login" {
 			return response, next.String()
 		}
 		target = next.String()
@@ -182,10 +182,10 @@ func (f *deviceFixture) beginLogin(client *http.Client) startedLogin {
 	response.Body.Close()
 	login, _ := url.Parse(response.Request.URL.String())
 	target, _ := url.Parse(console)
-	if target.Path != "/console/" || !strings.HasPrefix(target.Fragment, "device/") {
+	if !strings.HasPrefix(target.Path, "/device/") || target.Fragment != "" {
 		f.t.Fatalf("login did not continue to the Console confirmation: %s", console)
 	}
-	return startedLogin{endpoints: endpoints, authorization: authorization, loginChallenge: login.Query().Get("login_challenge"), id: strings.TrimPrefix(target.Fragment, "device/")}
+	return startedLogin{endpoints: endpoints, authorization: authorization, loginChallenge: login.Query().Get("login_challenge"), id: strings.TrimPrefix(target.Path, "/device/")}
 }
 
 // confirm chooses a principal and walks the browser through consent.

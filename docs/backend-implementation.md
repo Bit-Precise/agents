@@ -119,7 +119,8 @@ Egress 路径：
 | `/v1/instance`、`/v1/instance/status` | GET 公开入口信息、认证后的 revision/Edge 可用性；不返回实体快照 |
 | `/v1/sessions`、`/v1/sessions/current` | POST 创建 Cookie 会话（201）；GET 当前 Cookie 会话；DELETE 退出（204） |
 | `/v1/users/me`、`/v1/users/me/tokens` | GET 当前用户；POST 替换自己的用户 Token（201，一次性返回新秘密） |
-| `/v1/admin/users`、`/v1/admin/workspaces`、`/v1/admin/agents` | GET 分页列表与 `/{id}` 详情；用户和 Workspace 创建仅在 admin 命名空间，POST 返回 201 |
+| `/v1/admin/users`、`/v1/admin/workspaces`、`/v1/admin/agents` | GET 分页列表与 `/{id}` 详情；用户创建仅在 admin 命名空间，POST 返回 201 |
+| `/v1/workspaces` | GET 当前用户可见的 Workspace；POST 创建 Workspace（201），任何有效用户均可，创建者成为 owner，实例管理员以外的用户最多拥有 20 个且不能使用 `personal-` 前缀 |
 | `/v1/admin/users/{id}`、`/v1/admin/users/{id}/tokens` | PATCH `{disabled:true}` 停用；POST 替换指定用户 Token |
 | `/v1/workspaces/{workspaceId}/users` | GET 当前空间可见成员的安全用户资料；非管理员没有实例全局用户目录 |
 | Workspace 的 `/agents`、`/ingresses`、`/servers`、`/egresses`、`/routes` | GET 设备、访问端角色、发布服务、出口提供方角色和路由的独立分页视图；有对应详情接口 |
@@ -140,7 +141,7 @@ Agent 是设备身份，可以同时承担 ingress 和 egress 角色，也可以
 
 集合统一返回 `{items:[],pagination:{page,pageSize,total,totalPages}}`。`page` 默认 1，`pageSize` 默认 20、最大 100；越界页返回空数组。服务端先授权，再筛选和排序，最后统计及分页。`sortBy` 仅接受资源支持的字段，`sortOrder` 为 `asc|desc`，并使用稳定 ID 处理相同排序值。可用筛选包括名称 `q`、Workspace、用户、状态、启用/撤销状态、资源引用等，详见每个集合的 OpenAPI 参数。无效或未知查询参数返回 400。列表是实时读取，不保证多个请求构成同一事务快照。
 
-旧聚合 `/api/v1/state` 和旧管理动作路径已删除，不再返回 SPA HTML。Console 按当前页面、工作空间和页码调用资源 API，表单候选独立搜索和分页；身份或 Workspace 改变会取消旧请求。管理资源支持 User Bearer 或 Cookie；浏览器 Cookie 写请求同时要求同源 Origin 和内存 CSRF Token。`/v1/sessions/current` 仅表示实际 Cookie 会话，Bearer 身份应读取 `/v1/users/me`。错误保持 `{error:{kind,message}}`：未认证 401、已认证但权限/CSRF 被拒 403、不可见资源 404、状态冲突 409、超大 JSON 413、媒体类型不支持 415、依赖不可用 503。
+旧聚合 `/api/v1/state` 和旧管理动作路径已删除，不再返回 SPA HTML。Console 基于 shadcn/ui，页面地址即路由：`/workspaces/{workspaceId}/{overview|members|agents|ingresses|egresses|servers|routes|access}`，实例管理员页面在 `/admin/{workspaces|users|agents|ingresses|egresses|servers|audit}`，`agentd login` 的确认页在 `/device/{id}`。Console 按当前页面、工作空间和页码调用资源 API，表单候选独立搜索和分页；身份或 Workspace 改变会取消旧请求。管理资源支持 User Bearer 或 Cookie；浏览器 Cookie 写请求同时要求同源 Origin 和内存 CSRF Token。`/v1/sessions/current` 仅表示实际 Cookie 会话，Bearer 身份应读取 `/v1/users/me`。错误保持 `{error:{kind,message}}`：未认证 401、已认证但权限/CSRF 被拒 403、不可见资源 404、状态冲突 409、超大 JSON 413、媒体类型不支持 415、依赖不可用 503。
 
 设备控制协议使用 `POST /api/v1/enroll`（SA 注册密钥）、`POST /v1/agent-enrollments`（`agentd login`）、`GET /api/v1/agent/credentials`、`POST /api/v1/agent/config`。取消审批后请求体只包含身份与 desired spec，凭据文档为 v2，承载协议为 v3；agentd 需与服务端同时升级。`/agent` 是独立 XHTTP 入口；`/auth/oidc/login`、`/auth/oidc/callback`、`/auth/authorize`、Hydra 使用的 `/oauth/device`、`/oauth/login`、`/oauth/consent`、`/oauth/device/done`、`/oauth/error` 和服务域 `/__agents/callback` 是浏览器导航协议，内部 Control/Edge RPC 也不在本次迁移范围。
 

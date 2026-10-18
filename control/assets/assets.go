@@ -15,7 +15,8 @@ var files embed.FS
 
 // Base UI uses inline style properties for accessible popup positioning. Only
 // styles allow this; scripts remain same-origin with no inline/eval allowance.
-const policy = "default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+// Images may also come from HTTPS for IdP avatars; no referrer is sent.
+const policy = "default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' https:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 
 // Handler serves only embedded build assets or extensionless SPA navigation.
 // Missing API/auth routes and unknown files never become successful HTML pages.

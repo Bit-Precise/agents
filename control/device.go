@@ -297,7 +297,7 @@ func (a *App) deviceLogin(w http.ResponseWriter, r *http.Request) {
 		if a.oidc != nil {
 			http.Redirect(w, r, "/auth/oidc/login?"+url.Values{"returnTo": {continuation}}.Encode(), http.StatusSeeOther)
 		} else {
-			http.Redirect(w, r, "/console/?"+url.Values{"returnTo": {continuation}}.Encode(), http.StatusSeeOther)
+			http.Redirect(w, r, "/login?"+url.Values{"returnTo": {continuation}}.Encode(), http.StatusSeeOther)
 		}
 		return
 	}
@@ -311,7 +311,7 @@ func (a *App) deviceLogin(w http.ResponseWriter, r *http.Request) {
 		code = ""
 	}
 	a.beginDeviceTransaction(w, r, deviceTransaction{AuthorizationID: authorization.ID, UserID: user.ID, LoginChallenge: challenge, UserCode: code})
-	http.Redirect(w, r, "/console/#device/"+url.PathEscape(authorization.ID), http.StatusSeeOther)
+	http.Redirect(w, r, "/device/"+url.PathEscape(authorization.ID), http.StatusSeeOther)
 }
 
 func (a *App) rejectLogin(w http.ResponseWriter, r *http.Request, challenge, code, description string) {

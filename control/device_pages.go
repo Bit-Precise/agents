@@ -20,29 +20,31 @@ var (
 	pageDeclined    = devicePageContent{Title: "设备未授权", Message: "这次设备注册没有完成。请在终端按 Ctrl+C 结束 agentd login，需要时重新运行。"}
 )
 
+// The shadcn/ui neutral theme tokens, so these pages match the Console.
 const devicePageStyle = `<style>
-:root{color-scheme:light dark;font-family:system-ui,sans-serif}
-body{min-height:100vh;margin:0;display:grid;place-items:center;background:#f8fafc;color:#172033}
-main{width:min(30rem,calc(100% - 2rem));padding:2rem;border:1px solid #dbe2ea;border-radius:.75rem;background:#fff;box-sizing:border-box}
-h1{margin:0 0 .75rem;font-size:1.4rem}p{line-height:1.6;color:#526074}
-label{display:block;margin:1.25rem 0 .5rem;font-weight:600}
-input,button{width:100%;box-sizing:border-box;padding:.7rem .8rem;border-radius:.5rem;font:inherit}
-input{border:1px solid #b8c3d1;font-family:ui-monospace,monospace;letter-spacing:.08em}
-button{margin-top:1rem;border:0;background:#183b32;color:#fff;font-weight:600;cursor:pointer}
-.error{padding:.75rem;border-radius:.5rem;color:#991b1b;background:#fee2e2}
-.detail{font-size:.9rem;word-break:break-word}
-@media (prefers-color-scheme:dark){body{background:#07111f;color:#eef2ff}main{border-color:#263449;background:#101b2d}p{color:#aab7cb}input{border-color:#40506a;background:#0b1423;color:#eef2ff}}
+:root{color-scheme:light dark;--background:oklch(0.97 0 0);--card:oklch(1 0 0);--foreground:oklch(0.145 0 0);--muted-foreground:oklch(0.556 0 0);--border:oklch(0.922 0 0);--primary:oklch(0.205 0 0);--primary-foreground:oklch(0.985 0 0);--destructive:oklch(0.577 0.245 27.325);--ring:oklch(0.708 0 0);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+@media (prefers-color-scheme:dark){:root{--background:oklch(0.145 0 0);--card:oklch(0.205 0 0);--foreground:oklch(0.985 0 0);--muted-foreground:oklch(0.708 0 0);--border:oklch(1 0 0 / 10%);--primary:oklch(0.922 0 0);--primary-foreground:oklch(0.205 0 0);--destructive:oklch(0.704 0.191 22.216);--ring:oklch(0.556 0 0)}}
+body{min-height:100svh;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.5rem;padding:1.5rem;box-sizing:border-box;background:var(--background);color:var(--foreground);font-size:.875rem}
+.brand{display:flex;align-items:center;gap:.5rem;font-weight:500}.brand span{display:flex;width:1.5rem;height:1.5rem;align-items:center;justify-content:center;border-radius:.375rem;background:var(--primary);color:var(--primary-foreground)}
+main{width:min(24rem,100%);padding:1.5rem;border:1px solid var(--border);border-radius:.875rem;background:var(--card);box-sizing:border-box}
+h1{margin:0 0 .375rem;font-size:1.25rem;font-weight:600;letter-spacing:-.01em}p{margin:0;line-height:1.6;color:var(--muted-foreground)}
+label{display:block;margin:1.25rem 0 .5rem;font-weight:500}
+input,button{width:100%;box-sizing:border-box;height:2.25rem;padding:0 .75rem;border-radius:.625rem;font:inherit}
+input{border:1px solid var(--border);background:transparent;color:var(--foreground);font-family:ui-monospace,monospace;letter-spacing:.08em;outline:none}input:focus{border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in oklch,var(--ring) 50%,transparent)}
+button{margin-top:1rem;border:0;background:var(--primary);color:var(--primary-foreground);font-weight:500;cursor:pointer}button:hover{opacity:.9}
+.error{margin-top:1rem;padding:.75rem;border:1px solid color-mix(in oklch,var(--destructive) 30%,transparent);border-radius:.625rem;color:var(--destructive)}
+.detail{margin-top:.75rem;font-size:.8125rem;word-break:break-word}
 </style>`
 
 var devicePageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · agents</title>` + devicePageStyle + `</head>
-<body><main><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Detail}}<p class="detail">{{.Detail}}</p>{{end}}</main></body></html>`))
+<body><div class="brand"><span>a</span>agents</div><main><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Detail}}<p class="detail">{{.Detail}}</p>{{end}}</main></body></html>`))
 
 var deviceCodeTemplate = template.Must(template.New("code").Parse(`<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>注册设备 · agents</title>` + devicePageStyle + `</head>
-<body><main>
+<body><div class="brand"><span>a</span>agents</div><main>
 <h1>注册 agentd 设备</h1>
 <p>输入终端中 agentd login 显示的验证码。只在你自己刚刚运行了 agentd login 时继续。</p>
 {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}

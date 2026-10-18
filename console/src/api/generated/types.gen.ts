@@ -17,6 +17,14 @@ export type Error = {
 export type User = {
     id: string;
     name: string;
+    /**
+     * Verified email from the last SSO login.
+     */
+    email?: string;
+    /**
+     * HTTPS avatar URL from the last SSO login.
+     */
+    picture?: string;
     admin: boolean;
     disabled: boolean;
     createdAt: string;
@@ -1366,6 +1374,31 @@ export type ListWorkspacesResponses = {
 };
 
 export type ListWorkspacesResponse = ListWorkspacesResponses[keyof ListWorkspacesResponses];
+
+export type CreateWorkspaceData = {
+    body: CreateWorkspace;
+    path?: never;
+    query?: never;
+    url: '/v1/workspaces';
+};
+
+export type CreateWorkspaceErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateWorkspaceError = CreateWorkspaceErrors[keyof CreateWorkspaceErrors];
+
+export type CreateWorkspaceResponses = {
+    /**
+     * Success
+     */
+    201: Workspace;
+};
+
+export type CreateWorkspaceResponse = CreateWorkspaceResponses[keyof CreateWorkspaceResponses];
 
 export type ListAdminWorkspacesData = {
     body?: never;

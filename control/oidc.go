@@ -124,6 +124,16 @@ func safeOIDCReturnTo(value string) (string, bool) {
 	return u.RequestURI(), true
 }
 
+// avatarURL keeps an IdP picture only as a plain HTTPS URL; the Console shows
+// it as an image and falls back to initials otherwise.
+func avatarURL(value string) string {
+	u, err := url.Parse(value)
+	if err != nil || len(value) > 2048 || u.Scheme != "https" || u.Host == "" || u.User != nil || strings.ContainsAny(value, "\r\n\x00\"'<> ") {
+		return ""
+	}
+	return u.String()
+}
+
 func (a *App) oidcLogin(w http.ResponseWriter, r *http.Request) {
 	if a.oidc == nil {
 		http.NotFound(w, r)
@@ -217,6 +227,7 @@ func (a *App) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	var claims struct {
 		Name              string          `json:"name"`
 		PreferredUsername string          `json:"preferred_username"`
+		Picture           string          `json:"picture"`
 		AuthorizedParty   string          `json:"azp"`
 		Email             json.RawMessage `json:"email"`
 		EmailVerified     json.RawMessage `json:"email_verified"`
@@ -240,6 +251,7 @@ func (a *App) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		BootstrapAdmin: slices.Contains(a.Config.OIDC.BootstrapAdminSubjects, identity.Subject),
 		VerifiedEmail:  verifiedEmail,
 		EmailAdmin:     emailAdmin,
+		Picture:        avatarURL(claims.Picture),
 	})
 	if err != nil {
 		apiError(w, 403, "forbidden", "local account is unavailable")

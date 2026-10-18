@@ -30,7 +30,7 @@ const oidcTestClient = "agents-test-client"
 const oidcTestSecret = "private-oidc-client-secret"
 
 type testOIDCProfile struct {
-	Subject, Name, Email                                    string
+	Subject, Name, Email, Picture                           string
 	BadIssuer, BadAudience, BadNonce, BadSignature, Expired bool
 	EmailVerified                                           json.RawMessage
 	OmitEmailVerified                                       bool
@@ -129,7 +129,7 @@ func newTestOIDCProvider(t *testing.T) *testOIDCProvider {
 			if code.Profile.Expired {
 				expires = time.Now().Add(-time.Minute).Unix()
 			}
-			claims := map[string]any{"iss": issuer, "sub": code.Profile.Subject, "aud": audience, "nonce": nonce, "exp": expires, "iat": time.Now().Unix(), "name": code.Profile.Name, "email": code.Profile.Email, "email_verified": true, "admin": true, "roles": []string{"admin"}}
+			claims := map[string]any{"iss": issuer, "sub": code.Profile.Subject, "aud": audience, "nonce": nonce, "exp": expires, "iat": time.Now().Unix(), "name": code.Profile.Name, "email": code.Profile.Email, "email_verified": true, "picture": code.Profile.Picture, "admin": true, "roles": []string{"admin"}}
 			if code.Profile.OmitEmail {
 				delete(claims, "email")
 			} else if code.Profile.EmailClaim != nil {
@@ -322,7 +322,7 @@ func TestOIDCDiscoveryPKCEBrowserSessionSSOAndLogout(t *testing.T) {
 		t.Fatal("invalid public OIDC capabilities")
 	}
 	// The Console login button explicitly sends its canonical return path.
-	attempt := f.begin(testOIDCProfile{Subject: "alice-sub", Name: "Alice", Email: "alice@example.test"}, "/console/")
+	attempt := f.begin(testOIDCProfile{Subject: "alice-sub", Name: "Alice", Email: "Alice@Example.test", Picture: "https://avatars.example.test/alice.png"}, "/console/")
 	response = f.finish(attempt, 303)
 	if response.Header.Get("Location") != "/console/" {
 		t.Fatal("unexpected post-login redirect")
@@ -331,11 +331,19 @@ func TestOIDCDiscoveryPKCEBrowserSessionSSOAndLogout(t *testing.T) {
 	if user.Admin || csrf == "" {
 		t.Fatal("claims granted admin or session lacks CSRF")
 	}
+	if user.Email != "alice@example.test" || user.Picture != "https://avatars.example.test/alice.png" {
+		t.Fatalf("verified email and avatar were not kept: %+v", user)
+	}
 	idp.mu.Lock()
 	pkce, exchanges := idp.pkce, idp.exchanges
 	idp.mu.Unlock()
 	if !pkce || exchanges != 1 {
 		t.Fatal("PKCE exchange not verified")
+	}
+	// Each SSO login refreshes them; a non-HTTPS avatar is dropped.
+	f.finish(f.begin(testOIDCProfile{Subject: "alice-sub", Name: "Alice", Email: "alice@example.test", Picture: "javascript:alert(1)"}, "/console/"), 303)
+	if refreshed, _ := f.me(); refreshed.ID != user.ID || refreshed.Picture != "" || refreshed.Email != "alice@example.test" {
+		t.Fatalf("avatar was not refreshed safely: %+v", refreshed)
 	}
 	snapshot, err := f.app.State.SnapshotForUser(user.ID)
 	if err != nil || len(snapshot.Workspaces) != 1 || len(snapshot.Memberships) != 1 {

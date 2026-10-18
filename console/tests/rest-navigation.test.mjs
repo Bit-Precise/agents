@@ -199,13 +199,13 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
         const url = new URL(request.url());
         if (url.origin === base) calls.push({ session: kind, method: request.method(), path: url.pathname, query: url.search });
       });
-      await page.goto(base + "/console/");
+      await page.goto(base + "/");
       try { await page.getByLabel("访问令牌", { exact: true }).fill(token); }
       catch { throw new Error("Could not fill the local Console login field"); }
       const login = page.waitForResponse((response) => new URL(response.url()).pathname === "/v1/sessions" && response.request().method() === "POST");
       const [loggedIn] = await Promise.all([login, page.getByRole("button", { name: "登录", exact: true }).click()]);
       assert.equal(loggedIn.status(), 201);
-      await page.getByRole("button", { name: "退出登录" }).waitFor();
+      await page.getByRole("button", { name: "用户菜单" }).waitFor();
       return { context, page };
     }
     async function apiAction(page, action, path, query = {}) {
@@ -217,10 +217,16 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
       assert.equal(response.status(), 200, path);
       return response.json();
     }
+    const nav = (page, name) => page.getByRole("link", { name, exact: true }).click();
 
     const { page: admin } = await session(adminToken, "admin");
-    await admin.getByRole("link", { name: "权限与成员", exact: true }).click();
-    const users = await apiAction(admin, () => admin.getByRole("tab", { name: "用户", exact: true }).click(), "/v1/admin/users");
+    // The administrator owns aaa-shared and lands there; the switcher opens the admin panel.
+    await admin.waitForURL(base + `/workspaces/${sharedWorkspace.id}/overview`);
+    await admin.getByRole("button", { name: "切换工作空间" }).click();
+    await admin.getByRole("menuitem", { name: "进入管理员面板" }).click();
+    await admin.waitForURL(base + "/admin/workspaces");
+    const users = await apiAction(admin, () => nav(admin, "用户"), "/v1/admin/users");
+    assert.equal(new URL(admin.url()).pathname, "/admin/users", "admin pages are addressable");
     assert.equal(users.pagination.total, userCount + 1);
     assert.equal(users.items.length, 20);
     const second = await apiAction(admin, () => admin.getByRole("button", { name: "下一页", exact: true }).click(), "/v1/admin/users", { page: 2 });
@@ -229,9 +235,6 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
     assert.equal(found.pagination.total, 1);
     assert.equal(found.items[0].id, user.user.id);
     await apiAction(admin, () => admin.getByLabel("筛选当前列表").fill(""), "/v1/admin/users", { page: 1 });
-    await admin.getByRole("combobox", { name: "排序字段" }).click();
-    const sorted = await apiAction(admin, () => admin.getByRole("option", { name: "按名称", exact: true }).click(), "/v1/admin/users", { sortBy: "name" });
-    assert.equal(sorted.items[0].name, "admin");
     await admin.getByRole("combobox", { name: "状态筛选" }).click();
     const disabled = await apiAction(admin, () => admin.getByRole("option", { name: "已停用", exact: true }).click(), "/v1/admin/users", { disabled: true });
     assert.equal(disabled.pagination.total, 0);
@@ -239,74 +242,71 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
     await admin.getByRole("combobox", { name: "状态筛选" }).click();
     const enabled = await apiAction(admin, () => admin.getByRole("option", { name: "有效", exact: true }).click(), "/v1/admin/users", { disabled: false });
     assert.equal(enabled.pagination.total, userCount + 1);
-    await apiAction(admin, () => admin.getByRole("tab", { name: "工作空间", exact: true }).click(), "/v1/admin/workspaces");
+    await apiAction(admin, () => nav(admin, "工作空间"), "/v1/admin/workspaces");
     await admin.getByRole("button", { name: "创建工作空间", exact: true }).click();
     await admin.getByLabel("工作空间名称").fill("ui-browser-created");
-    const creation = admin.waitForResponse((response) => new URL(response.url()).pathname === "/v1/admin/workspaces" && response.request().method() === "POST");
-    const [created] = await Promise.all([creation, admin.getByRole("dialog").getByRole("button", { name: "确认保存", exact: true }).click()]);
+    const creation = admin.waitForResponse((response) => new URL(response.url()).pathname === "/v1/workspaces" && response.request().method() === "POST");
+    const [created] = await Promise.all([creation, admin.getByRole("dialog").getByRole("button", { name: "创建", exact: true }).click()]);
     assert.equal(created.status(), 201);
     assert.ok(created.headers().location);
     const creationHeaders = await created.request().allHeaders();
     assert.ok(creationHeaders["x-csrf-token"], "browser creation must send CSRF");
     assert.ok(creationHeaders.cookie, "browser creation must use its session cookie");
-    await admin.getByRole("dialog").waitFor({ state: "hidden" });
-    t.diagnostic("Admin pagination, search, sort, boolean filters, and cookie/CSRF creation passed.");
+    const createdWorkspace = await created.json();
+    await admin.waitForURL(base + `/workspaces/${createdWorkspace.id}/overview`);
+    t.diagnostic("Admin pagination, search, filters, addressable admin pages and cookie/CSRF creation passed.");
 
     const { page } = await session(user.token, "user");
     const userBase = `/v1/workspaces/${workspace.id}`;
-    await page.getByRole("button", { name: new RegExp(workspace.name) }).waitFor();
-    const agents = await apiAction(page, () => page.getByRole("link", { name: "Agents", exact: true }).click(), userBase + "/agents");
+    // A person lands on their personal Workspace; the URL names it.
+    await page.waitForURL(base + `/workspaces/${workspace.id}/overview`);
+    const agents = await apiAction(page, () => nav(page, "Agent 管理"), userBase + "/agents");
+    assert.equal(new URL(page.url()).pathname, `/workspaces/${workspace.id}/agents`);
     assert.equal(agents.pagination.total, 1);
     assert.equal(agents.items[0].id, enrolled.agent.id);
     await page.getByText("ui-device", { exact: true }).waitFor();
-    for (const [label, resource] of [["访问端", "ingresses"], ["出口提供方", "egresses"]]) {
-      const roles = await apiAction(page, () => page.getByRole("tab", { name: label, exact: true }).click(), `${userBase}/${resource}`);
+    for (const [label, resource] of [["Ingress 管理", "ingresses"], ["Egress 管理", "egresses"]]) {
+      const roles = await apiAction(page, () => nav(page, label), `${userBase}/${resource}`);
       assert.equal(roles.pagination.total, 1);
       assert.equal(roles.items[0].agentId, enrolled.agent.id);
       await page.getByText("ui-device", { exact: true }).waitFor();
-      assert.deepEqual(errors, [], "role transitions must not render the previous resource DTO");
+      assert.deepEqual(errors, [], "page transitions must not render the previous resource DTO");
     }
-    // Keep responses in flight while switching incompatible row shapes, then check the final active scope.
+    // Keep responses in flight while switching incompatible row shapes, then check the final page.
     await page.route(`${base}${userBase}/*`, async (route) => {
       if (/\/(agents|ingresses|egresses)$/.test(new URL(route.request().url()).pathname)) await delay(150);
       await route.continue().catch(() => {});
     });
-    for (const label of ["设备", "访问端", "出口提供方", "设备"]) await page.getByRole("tab", { name: label, exact: true }).click();
-    const finalRoles = await apiAction(page, () => page.getByRole("tab", { name: "访问端", exact: true }).click(), userBase + "/ingresses");
+    for (const label of ["Agent 管理", "Ingress 管理", "Egress 管理", "Agent 管理"]) await nav(page, label);
+    const finalRoles = await apiAction(page, () => nav(page, "Ingress 管理"), userBase + "/ingresses");
     assert.equal(finalRoles.items[0].agentId, enrolled.agent.id);
     await page.getByText("ui-device", { exact: true }).waitFor();
     await page.unrouteAll({ behavior: "wait" });
-    const servers = await apiAction(page, () => page.getByRole("link", { name: "服务发布", exact: true }).click(), userBase + "/servers");
+    const servers = await apiAction(page, () => nav(page, "Server 管理"), userBase + "/servers");
     assert.equal(servers.pagination.total, 1);
     assert.equal(servers.items[0].name, "demo");
     await page.getByText("demo", { exact: true }).waitFor();
-    const routes = await apiAction(page, () => page.getByRole("link", { name: "路由规则", exact: true }).click(), userBase + "/routes");
+    const routes = await apiAction(page, () => nav(page, "路由管理"), userBase + "/routes");
     assert.ok(routes.items.some((item) => item.kind === "egress" && item.targetId === enrolled.agent.id));
     assert.ok(routes.items.some((item) => item.kind === "serve" && item.targetType === "server"));
     await page.getByText("ui-egress", { exact: true }).waitFor();
-    await page.getByRole("button", { name: new RegExp(workspace.name) }).click();
-    const picker = page.getByRole("dialog");
-    const noChoices = await apiAction(page, () => picker.getByLabel("搜索工作空间").fill("no-such-workspace"), "/v1/workspaces", { q: "no-such-workspace" });
-    assert.equal(noChoices.pagination.total, 0);
-    await picker.getByRole("button", { name: /aaa-shared/ }).waitFor({ state: "hidden" });
-    const choices = await apiAction(page, () => picker.getByLabel("搜索工作空间").fill("aaa-shared"), "/v1/workspaces", { q: "aaa-shared" });
-    assert.equal(choices.pagination.total, 1);
-    const scoped = await apiAction(page, () => picker.getByRole("button", { name: /aaa-shared/ }).click(), `/v1/workspaces/${sharedWorkspace.id}/routes`);
+    // The switcher moves to another Workspace; the same page shows only its data.
+    await page.getByRole("button", { name: "切换工作空间" }).click();
+    await page.getByRole("menuitem", { name: /aaa-shared/ }).click();
+    await page.waitForURL(base + `/workspaces/${sharedWorkspace.id}/overview`);
+    const scoped = await apiAction(page, () => nav(page, "路由管理"), `/v1/workspaces/${sharedWorkspace.id}/routes`);
     assert.equal(scoped.pagination.total, 0);
     await page.getByText("ui-egress", { exact: true }).waitFor({ state: "hidden" });
     // The owner of the personal Workspace manages its Service Accounts.
-    await page.getByRole("dialog").waitFor({ state: "hidden" });
-    await page.getByRole("button", { name: "aaa-shared", exact: true }).click();
-    await apiAction(page, () => page.getByRole("dialog").getByLabel("搜索工作空间").fill(workspace.name), "/v1/workspaces", { q: workspace.name });
-    await page.getByRole("dialog").getByRole("button", { name: new RegExp(workspace.name) }).click();
-    await page.getByRole("link", { name: "权限与成员", exact: true }).click();
+    await page.goto(base + `/workspaces/${workspace.id}/members`);
     const accounts = await apiAction(page, () => page.getByRole("tab", { name: "服务账号", exact: true }).click(), userBase + "/service-accounts");
+    assert.equal(new URL(page.url()).searchParams.get("tab"), "service-accounts", "the tab is part of the address");
     assert.equal(accounts.pagination.total, 1);
     await page.getByText("ui-fleet", { exact: true }).waitFor();
     await page.getByRole("button", { name: "创建服务账号", exact: true }).click();
     await page.getByLabel("服务账号名称").fill("ui-created");
     const accountCreation = page.waitForResponse((response) => new URL(response.url()).pathname === userBase + "/service-accounts" && response.request().method() === "POST");
-    const [createdAccount] = await Promise.all([accountCreation, page.getByRole("dialog").getByRole("button", { name: "确认保存", exact: true }).click()]);
+    const [createdAccount] = await Promise.all([accountCreation, page.getByRole("dialog").getByRole("button", { name: "创建", exact: true }).click()]);
     assert.equal(createdAccount.status(), 201);
     await page.getByText("ui-created", { exact: true }).waitFor();
     t.diagnostic("Service Account management passed.");
@@ -325,7 +325,8 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
       await page.goto(started.verification_uri_complete);
       await page.getByLabel("验证码").fill(started.user_code);
       await page.getByRole("button", { name: "继续", exact: true }).click();
-      await page.getByRole("heading", { name: "注册 agentd 设备" }).waitFor();
+      await page.waitForURL(/\/device\//);
+      await page.getByText("注册 agentd 设备", { exact: true }).waitFor();
       await page.getByText(started.user_code, { exact: true }).waitFor();
       await page.getByRole("radio", { name: /个人空间/ }).click();
       await page.getByRole("radio", { name: /服务账号 ui-fleet/ }).waitFor();
@@ -350,7 +351,7 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
     assert.equal(calls.some((call) => call.session === "user" && call.path.startsWith("/v1/admin/")), false, "ordinary pages must never request admin resources");
     assert.equal(calls.some((call) => /\/(?:api\/)?v1\/state$/.test(call.path)), false, "aggregate state requests are forbidden");
     assert.deepEqual(errors, [], "Console must not raise JavaScript errors");
-    t.diagnostic("Personal-workspace default, rapid role tabs, routes, and workspace switching passed without aggregate/admin requests or JavaScript errors.");
+    t.diagnostic("Personal-workspace default, addressable pages, rapid navigation, routes and workspace switching passed without aggregate/admin requests or JavaScript errors.");
   } catch (error) {
     if (browser) {
       const diagnostics = await mkdtemp(join(tmpdir(), "agents-console-ui-failure-"));
