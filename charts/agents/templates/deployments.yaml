@@ -1,0 +1,135 @@
+{{- range $component := list "control" "edge" "console" }}
+{{- $settings := index $.Values $component }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agents.fullname" $ }}-{{ $component }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "agents.labels" (dict "root" $ "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ $settings.replicaCount }}
+  strategy:
+    {{- if eq $component "console" }}
+    type: RollingUpdate
+    {{- else }}
+    type: Recreate
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "agents.selectorLabels" (dict "root" $ "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "agents.selectorLabels" (dict "root" $ "component" $component) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "agents.configuration" (dict "root" $ "component" $component) | sha256sum }}
+        {{- with $settings.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      os:
+        name: linux
+      serviceAccountName: {{ include "agents.serviceAccountName" $ }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $.Values.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $component }}
+          image: {{ printf "%s:%s" $settings.image.repository (default $.Chart.AppVersion $.Values.image.tag) | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["/usr/local/bin/agents"]
+          args: [{{ $component | quote }}, "--config", "/etc/agents/config.yaml"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml $settings.resources | nindent 12 }}
+          {{- if $.Values.probes.enabled }}
+          startupProbe:
+            {{- toYaml $.Values.probes.startup | nindent 12 }}
+          readinessProbe:
+            {{- toYaml $.Values.probes.readiness | nindent 12 }}
+          livenessProbe:
+            {{- toYaml $.Values.probes.liveness | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: configuration
+              mountPath: /etc/agents/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if ne $component "console" }}
+            - name: credentials
+              mountPath: /etc/agents/secrets
+              readOnly: true
+            {{- end }}
+            {{- if eq $component "control" }}
+            - name: state
+              mountPath: /var/lib/agents
+            {{- end }}
+      volumes:
+        - name: configuration
+          configMap:
+            name: {{ include "agents.fullname" $ }}-{{ $component }}-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ $.Values.tmpSizeLimit | quote }}
+        {{- if ne $component "console" }}
+        - name: credentials
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ $.Values.existingSecret | quote }}
+                  items:
+                    - key: {{ $.Values.secretKeys.internalToken | quote }}
+                      path: internal.token
+                    {{- if eq $component "control" }}
+                    - key: {{ $.Values.secretKeys.adminToken | quote }}
+                      path: admin.token
+                    {{- if eq $.Values.database.type "postgres" }}
+                    - key: {{ $.Values.secretKeys.databaseDSN | quote }}
+                      path: database-dsn
+                    {{- end }}
+                    {{- end }}
+              {{- if and (eq $component "control") $.Values.oidc.enabled $.Values.oidc.clientSecretKey }}
+              - secret:
+                  name: {{ default $.Values.existingSecret $.Values.oidc.existingSecret | quote }}
+                  items:
+                    - key: {{ $.Values.oidc.clientSecretKey | quote }}
+                      path: client-secret
+              {{- end }}
+        {{- end }}
+        {{- if eq $component "control" }}
+        - name: state
+          {{- if and (eq $.Values.database.type "sqlite") $.Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" (include "agents.fullname" $)) $.Values.persistence.existingClaim | quote }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

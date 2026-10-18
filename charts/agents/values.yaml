@@ -1,0 +1,153 @@
+nameOverride: ""
+fullnameOverride: ""
+
+# This Secret must already exist in the release namespace. No secrets are generated.
+existingSecret: agents-credentials
+secretKeys:
+  adminToken: admin.token
+  internalToken: internal.token
+  databaseDSN: database-dsn
+
+public:
+  serverURL: https://agents.example.com
+  edgeURL: https://connect.agents.example.com/agent
+
+image:
+  # Empty means Chart.appVersion. Releases publish multi-arch amd64/arm64 images.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+control:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/bit-precise/agents-control
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  podAnnotations: {}
+
+edge:
+  # Connection ownership is single-Edge. Scaling this deployment is unsupported.
+  replicaCount: 1
+  image:
+    repository: ghcr.io/bit-precise/agents-edge
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  podAnnotations: {}
+
+console:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/bit-precise/agents-console
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 250m, memory: 128Mi}
+  podAnnotations: {}
+
+database:
+  type: sqlite
+
+# Only control mounts this volume. PostgreSQL deployments use no PVC.
+persistence:
+  enabled: true
+  retain: true
+  existingClaim: ""
+  size: 1Gi
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+
+oidc:
+  enabled: false
+  issuer: ""
+  clientId: ""
+  # Optional confidential-client secret. Empty key selects public-client PKCE.
+  existingSecret: ""
+  clientSecretKey: ""
+  scopes: [openid, profile, email]
+  # Exact subjects at the configured issuer; new users have no workspace membership.
+  bootstrapAdminSubjects: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+terminationGracePeriodSeconds: 30
+tmpSizeLimit: 64Mi
+nodeSelector:
+  kubernetes.io/os: linux
+tolerations: []
+affinity: {}
+
+probes:
+  enabled: true
+  # /healthz reports process health, not end-to-end provider or database readiness.
+  startup:
+    httpGet: {path: /healthz, port: http}
+    periodSeconds: 2
+    timeoutSeconds: 2
+    failureThreshold: 30
+  readiness:
+    httpGet: {path: /healthz, port: http}
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+  liveness:
+    httpGet: {path: /healthz, port: http}
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  # One wildcard per workspace, e.g. *.workspace1.agents.example.com.
+  # Exact names like demo.workspace1.agents.example.com are also accepted.
+  serviceHosts: []
+  # Existing TLS Secrets; no certificates or certificate requests are created.
+  # Empty relies on the ingress controller's configured default certificate.
+  tls: []
+
+networkPolicy:
+  enabled: false
+  # Adjust for the actual ingress controller before enabling policy enforcement.
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+  dnsPeers:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+  postgresEgress:
+    - to:
+        - ipBlock: {cidr: 0.0.0.0/0}
+        - ipBlock: {cidr: "::/0"}
+      ports: [{protocol: TCP, port: 5432}]
+  oidcEgress:
+    - to:
+        - ipBlock: {cidr: 0.0.0.0/0}
+        - ipBlock: {cidr: "::/0"}
+      ports: [{protocol: TCP, port: 443}]
+  extraEgress:
+    control: []
+    edge: []
+    console: []

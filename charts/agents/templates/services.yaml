@@ -1,0 +1,19 @@
+{{- range $component := list "control" "edge" "console" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agents.fullname" $ }}-{{ $component }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "agents.labels" (dict "root" $ "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "agents.selectorLabels" (dict "root" $ "component" $component) | nindent 4 }}
+{{- end }}

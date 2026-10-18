@@ -1,0 +1,13 @@
+{{- range $component := list "control" "edge" "console" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agents.fullname" $ }}-{{ $component }}-config
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "agents.labels" (dict "root" $ "component" $component) | nindent 4 }}
+data:
+  config.yaml: |
+    {{- include "agents.configuration" (dict "root" $ "component" $component) | nindent 4 }}
+{{- end }}

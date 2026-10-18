@@ -1,0 +1,620 @@
+{
+  "type": "object",
+  "properties": {
+    "nameOverride": {
+      "type": "string",
+      "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 48
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 48
+    },
+    "existingSecret": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+    },
+    "secretKeys": {
+      "type": "object",
+      "properties": {
+        "adminToken": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "internalToken": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "databaseDSN": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 253
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "adminToken",
+        "internalToken",
+        "databaseDSN"
+      ]
+    },
+    "public": {
+      "type": "object",
+      "properties": {
+        "serverURL": {
+          "type": "string",
+          "pattern": "^https://[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*/?$",
+          "maxLength": 262
+        },
+        "edgeURL": {
+          "type": "string",
+          "pattern": "^https://[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*/agent$",
+          "maxLength": 268
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "serverURL",
+        "edgeURL"
+      ]
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "tag": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "maxLength": 128
+        },
+        "pullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "tag",
+        "pullPolicy"
+      ]
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+            "maxLength": 63
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "control": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "const": 1
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "repository"
+          ]
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "podAnnotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "replicaCount",
+        "image",
+        "resources",
+        "podAnnotations"
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "const": 1
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "repository"
+          ]
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "podAnnotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "replicaCount",
+        "image",
+        "resources",
+        "podAnnotations"
+      ]
+    },
+    "console": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "repository"
+          ]
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "podAnnotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "replicaCount",
+        "image",
+        "resources",
+        "podAnnotations"
+      ]
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "sqlite",
+            "postgres"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ]
+    },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "existingClaim": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string",
+          "minLength": 1
+        },
+        "storageClass": {
+          "type": "string"
+        },
+        "accessModes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "ReadWriteOnce",
+              "ReadWriteOncePod"
+            ]
+          }
+        },
+        "retain": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "existingClaim",
+        "size",
+        "storageClass",
+        "accessModes",
+        "retain"
+      ]
+    },
+    "oidc": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "issuer": {
+          "type": "string"
+        },
+        "clientId": {
+          "type": "string"
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "clientSecretKey": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z0-9._-]+$"
+        },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "contains": {
+            "const": "openid"
+          },
+          "items": {
+            "enum": [
+              "openid",
+              "profile",
+              "email"
+            ]
+          }
+        },
+        "bootstrapAdminSubjects": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "issuer",
+        "clientId",
+        "existingSecret",
+        "clientSecretKey",
+        "scopes",
+        "bootstrapAdminSubjects"
+      ]
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "create",
+        "name",
+        "annotations"
+      ]
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "securityContext": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "nodeSelector": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "tolerations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "affinity": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 600
+    },
+    "tmpSizeLimit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "probes": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "startup": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "readiness": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "liveness": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "startup",
+        "readiness",
+        "liveness"
+      ]
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "serviceHosts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(?:\\*\\.)?[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*$",
+            "maxLength": 253
+          }
+        },
+        "tls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "secretName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hosts": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "secretName",
+              "hosts"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "className",
+        "annotations",
+        "serviceHosts",
+        "tls"
+      ]
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingressFrom": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "dnsPeers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "postgresEgress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "oidcEgress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "extraEgress": {
+          "type": "object",
+          "properties": {
+            "control": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "edge": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "console": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "control",
+            "edge",
+            "console"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "ingressFrom",
+        "dnsPeers",
+        "postgresEgress",
+        "oidcEgress",
+        "extraEgress"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "nameOverride",
+    "fullnameOverride",
+    "existingSecret",
+    "secretKeys",
+    "public",
+    "image",
+    "imagePullSecrets",
+    "control",
+    "edge",
+    "console",
+    "database",
+    "persistence",
+    "oidc",
+    "serviceAccount",
+    "podSecurityContext",
+    "securityContext",
+    "nodeSelector",
+    "tolerations",
+    "affinity",
+    "terminationGracePeriodSeconds",
+    "tmpSizeLimit",
+    "probes",
+    "ingress",
+    "networkPolicy"
+  ],
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "agents Helm values",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "oidc": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "oidc": {
+            "properties": {
+              "issuer": {
+                "type": "string",
+                "pattern": "^https://[^\\s@?#]+$"
+              },
+              "clientId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

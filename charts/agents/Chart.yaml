@@ -1,0 +1,17 @@
+apiVersion: v2
+name: agents
+description: Separate control, edge, and console components for agents.
+type: application
+version: 0.1.0
+appVersion: "v0.1.0"
+kubeVersion: ">=1.26.0-0"
+home: https://github.com/bit-precise/agents
+sources:
+  - https://github.com/bit-precise/agents
+keywords:
+  - agents
+  - reverse-proxy
+  - access-control
+maintainers:
+  - name: bit-precise
+    url: https://github.com/bit-precise

@@ -1,0 +1,15 @@
+.git
+bin
+dist
+state
+.run
+*.db
+*.db-*
+*.token
+*.key
+credentials.json
+go.work*
+**/*_test.go
+
+console/node_modules
+console/dist

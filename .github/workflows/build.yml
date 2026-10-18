@@ -1,0 +1,205 @@
+name: Test, build and release agents
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: agents-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+env:
+  GO_VERSION: '1.27.2'
+  GOTOOLCHAIN: local
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agents_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agents_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Generate and verify the OpenAPI Console
+        run: |
+          npm ci --prefix console
+          npm run generate --prefix console
+          git diff --exit-code -- console/src/api/generated
+          npm run typecheck --prefix console
+          npm run build --prefix console
+          git diff --exit-code -- control/assets/web
+      - name: Authenticate read-only SDK access
+        env:
+          AGENTD_DEPLOY_KEY: ${{ secrets.AGENTD_DEPLOY_KEY }}
+        run: source scripts/setup-sdk-ssh.sh
+      - name: Test SQL, component RPC, routing and client interoperability
+        env:
+          AGENTS_TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/agents_test?sslmode=disable
+        run: |
+          go mod download
+          git diff --exit-code -- go.mod go.sum
+          go mod verify
+          test -z "$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
+          go vet -mod=readonly ./...
+          go test -mod=readonly -race -timeout=120s ./...
+      - name: Stop SDK authentication agent
+        if: always()
+        run: if [ -n "${SSH_AGENT_PID:-}" ]; then ssh-agent -k >/dev/null; fi
+
+  chart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Helm
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/helm.tgz" https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/helm.sha256" https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz.sha256sum
+          (cd "$RUNNER_TEMP" && cp helm.tgz helm-v4.3.1-linux-amd64.tar.gz && sha256sum -c helm.sha256)
+          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/linux-amd64" >> "$GITHUB_PATH"
+      - name: Validate chart
+        run: |
+          helm lint charts/agents --strict
+          python3 -m unittest discover -s charts/agents/tests -p 'test_*.py' -v
+          mkdir -p dist
+          helm package charts/agents --destination dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agents-chart
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  images:
+    needs: [test, chart]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [control, edge, console]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || exit 1
+            version=$GITHUB_REF_NAME
+          else
+            version="sha-${GITHUB_SHA:0:12}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Authenticate read-only SDK access
+        env:
+          AGENTD_DEPLOY_KEY: ${{ secrets.AGENTD_DEPLOY_KEY }}
+        run: source scripts/setup-sdk-ssh.sh
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build native image for deployment smoke test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: ${{ matrix.component }}
+          platforms: linux/amd64
+          tags: agents-${{ matrix.component }}:ci
+          outputs: type=docker,dest=/tmp/agents-${{ matrix.component }}.tar
+          ssh: default=${{ env.SSH_AUTH_SOCK }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=agents-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=agents-${{ matrix.component }}
+      - name: Run packaged executable
+        run: |
+          docker load -i /tmp/agents-${{ matrix.component }}.tar
+          docker run --rm agents-${{ matrix.component }}:ci version
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agents-${{ matrix.component }}-smoke-image
+          path: /tmp/agents-${{ matrix.component }}.tar
+          compression-level: 0
+          retention-days: 3
+      - name: Build both architectures and publish tagged component image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: ${{ matrix.component }}
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/bit-precise/agents-${{ matrix.component }}:${{ steps.version.outputs.version }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          outputs: ${{ startsWith(github.ref, 'refs/tags/v') && 'type=image' || format('type=oci,dest=/tmp/agents-{0}-multiarch.tar', matrix.component) }}
+          ssh: default=${{ env.SSH_AUTH_SOCK }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=agents-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=agents-${{ matrix.component }}
+      - name: Stop SDK authentication agent
+        if: always()
+        run: if [ -n "${SSH_AGENT_PID:-}" ]; then ssh-agent -k >/dev/null; fi
+
+  deployment:
+    needs: [images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: agents-*-smoke-image
+          path: images
+          merge-multiple: true
+      - name: Exercise Helm deployment
+        run: bash scripts/test-helm-deployment.sh
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, chart, images, deployment]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Publish chart and release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bash scripts/publish-release.sh

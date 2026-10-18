@@ -1,0 +1,26 @@
+{{- if ne (int .Values.control.replicaCount) 1 -}}
+{{- fail "control.replicaCount must be 1; multiple control writers are not supported" -}}
+{{- end -}}
+{{- if ne (int .Values.edge.replicaCount) 1 -}}
+{{- fail "edge.replicaCount must be 1; connection ownership does not support multiple Edge replicas" -}}
+{{- end -}}
+{{- $_ := required "existingSecret must reference an operator-provisioned Secret" .Values.existingSecret -}}
+{{- $base := (urlParse .Values.public.serverURL).host -}}
+{{- if regexMatch "^([0-9]+|0x[0-9a-f]+)(\\.([0-9]+|0x[0-9a-f]+))*$" $base -}}
+{{- fail "public.serverURL requires a DNS hostname rather than a numeric address" -}}
+{{- end -}}
+{{- range .Values.ingress.serviceHosts -}}
+  {{- $host := . -}}
+  {{- if not (hasSuffix (printf ".%s" $base) $host) -}}
+    {{- fail (printf "serviceHost %q must be inside the configured instance domain" $host) -}}
+  {{- end -}}
+  {{- $prefix := trimSuffix (printf ".%s" $base) $host -}}
+  {{- if hasPrefix "*." $host -}}
+    {{- $workspace := trimPrefix "*." $prefix -}}
+    {{- if or (not (hasPrefix "*." $prefix)) (eq $workspace "") (contains "." $workspace) -}}
+      {{- fail "a service wildcard must contain exactly one workspace label before the instance domain" -}}
+    {{- end -}}
+  {{- else if ne (len (splitList "." $prefix)) 2 -}}
+    {{- fail "an exact serviceHost must be service.workspace.instance-domain" -}}
+  {{- end -}}
+{{- end -}}

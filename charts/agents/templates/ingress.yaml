@@ -1,0 +1,65 @@
+{{- if .Values.ingress.enabled }}
+{{- $root := . }}
+{{- $name := include "agents.fullname" . }}
+{{- $controlHost := (urlParse .Values.public.serverURL).host }}
+{{- $edgeHost := (urlParse .Values.public.edgeURL).host }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agents.labels" (dict "root" . "component" "edge") | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ $controlHost | quote }}
+      http:
+        paths:
+          {{- if eq $controlHost $edgeHost }}
+          - path: /agent
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}-edge
+                port: {name: http}
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}-control
+                port: {name: http}
+    {{- if ne $controlHost $edgeHost }}
+    - host: {{ $edgeHost | quote }}
+      http:
+        paths:
+          - path: /agent
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}-edge
+                port: {name: http}
+    {{- end }}
+    {{- range .Values.ingress.serviceHosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}-edge
+                port: {name: http}
+    {{- end }}
+{{- end }}
