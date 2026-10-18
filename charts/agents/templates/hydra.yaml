@@ -84,17 +84,17 @@ spec:
             {{- toYaml .Values.hydra.resources | nindent 12 }}
           {{- if .Values.probes.enabled }}
           startupProbe:
-            httpGet: {path: /health/ready, port: admin}
+            httpGet: {path: /health/ready, port: public}
             periodSeconds: 2
             timeoutSeconds: 2
             failureThreshold: 30
           readinessProbe:
-            httpGet: {path: /health/ready, port: admin}
+            httpGet: {path: /health/ready, port: public}
             periodSeconds: 5
             timeoutSeconds: 2
             failureThreshold: 3
           livenessProbe:
-            httpGet: {path: /health/alive, port: admin}
+            httpGet: {path: /health/alive, port: public}
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
@@ -125,6 +125,33 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- if not .Values.networkPolicy.enabled }}
+---
+# Hydra's Admin API has no authentication of its own. Without the full
+# networkPolicy set, this guard still admits only Control to the Admin port;
+# the public port stays reachable for the Ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-hydra-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agents.labels" (dict "root" . "component" "hydra") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agents.selectorLabels" (dict "root" . "component" "hydra") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 4444}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "agents.selectorLabels" (dict "root" . "component" "control") | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 4445}
+{{- end }}
 {{- if eq .Values.hydra.database.type "postgres" }}
 ---
 # Hydra's schema follows its release: migrate before every install or upgrade.

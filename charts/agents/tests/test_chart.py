@@ -284,6 +284,18 @@ class ChartTests(unittest.TestCase):
         self.assertNotIn("namespaceSelector", admin_rule)
         self.assertIn("port: 4445", documents[("NetworkPolicy", "unit-agents-control")])
         self.assertIn("port: 5432", documents[("NetworkPolicy", "unit-agents-hydra-migrate")])
+        # The full policy set replaces the guard rather than adding to it.
+        self.assertNotIn(("NetworkPolicy", "unit-agents-hydra-admin"), documents)
+        # Without the full set, a guard still keeps the Admin API to Control.
+        guarded = render({"oidc": oidc, "hydra": {"enabled": True, "publicURL": "https://auth.agents.example.com"}})
+        guard = guarded[("NetworkPolicy", "unit-agents-hydra-admin")]
+        self.assertIn("policyTypes: [Ingress]", guard)
+        open_rule, admin_rule = re.split(r"(?m)^    - from:", guard.split("ingress:", 1)[1])
+        self.assertIn("port: 4444", open_rule)
+        self.assertNotIn("4445", open_rule)
+        self.assertIn("app.kubernetes.io/component: control", admin_rule)
+        self.assertIn("port: 4445", admin_rule)
+        self.assertFalse(any(kind == "NetworkPolicy" and "hydra" not in name for kind, name in guarded))
         # Same-origin issuer: exact issuer paths ahead of Control's catch-all.
         same = render({"oidc": oidc, "hydra": {"enabled": True, "publicURL": "https://agents.example.com", "audience": "urn:agents:prod:agent-enrollment"}})
         ingress = same[("Ingress", "unit-agents")]
