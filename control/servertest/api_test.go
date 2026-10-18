@@ -162,8 +162,13 @@ func TestHTTPAPIPersistsRegistrationAcrossServerRestart(t *testing.T) {
 	restarted := startHarness(t, database, address)
 	var snapshot types.Snapshot
 	restarted.api("GET", "/api/v1/state", u.Token, nil, &snapshot, 200)
-	if len(snapshot.Agents) != 1 || snapshot.Agents[0].ID != enrolled.Agent.ID || len(snapshot.Workspaces) != 1 {
+	if len(snapshot.Agents) != 1 || snapshot.Agents[0].ID != enrolled.Agent.ID || len(snapshot.Workspaces) != 2 {
 		t.Fatal("server restart lost scoped resource state")
+	}
+	for _, workspace := range snapshot.Workspaces {
+		if workspace.ID != w.ID && workspace.Name != "personal-"+u.User.ID {
+			t.Fatal("server restart exposed another user's workspace")
+		}
 	}
 	var refreshed credentials.Credentials
 	restarted.api("GET", "/api/v1/agent/credentials", enrolled.Credentials.ControlToken, nil, &refreshed, 200)
@@ -196,8 +201,13 @@ func TestSnapshotDoesNotLeakOtherWorkspaceSessions(t *testing.T) {
 		Flows       []edge.FlowStatus       `json:"flows"`
 	}
 	h.api("GET", "/api/v1/state", alice.Token, nil, &view, 200)
-	if len(view.Workspaces) != 1 || view.Workspaces[0].ID != w1.ID {
+	if len(view.Workspaces) != 2 {
 		t.Fatal("snapshot leaked another workspace")
+	}
+	for _, workspace := range view.Workspaces {
+		if workspace.ID != w1.ID && workspace.Name != "personal-"+alice.User.ID {
+			t.Fatal("snapshot exposed a workspace outside the user's personal and assigned workspaces")
+		}
 	}
 	for _, a := range view.Agents {
 		if a.WorkspaceID != w1.ID {

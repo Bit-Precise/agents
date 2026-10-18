@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	controlstate "github.com/bit-precise/agents/control/state"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )
@@ -24,11 +26,12 @@ type oidcTransaction struct {
 }
 
 type oidcAuth struct {
-	mu       sync.Mutex
-	pending  map[string]oidcTransaction
-	verifier *oidc.IDTokenVerifier
-	oauth    oauth2.Config
-	http     *http.Client
+	mu          sync.Mutex
+	pending     map[string]oidcTransaction
+	verifier    *oidc.IDTokenVerifier
+	oauth       oauth2.Config
+	http        *http.Client
+	adminEmails map[string]struct{}
 }
 
 func newOIDC(ctx context.Context, cfg Config) (*oidcAuth, error) {
@@ -79,7 +82,18 @@ func newOIDC(ctx context.Context, cfg Config) (*oidcAuth, error) {
 	if !slices.Contains(scopes, oidc.ScopeOpenID) {
 		scopes = append([]string{oidc.ScopeOpenID}, scopes...)
 	}
-	return &oidcAuth{pending: make(map[string]oidcTransaction), http: client,
+	adminEmails := make(map[string]struct{}, len(cfg.OIDC.AdminEmails))
+	for _, value := range cfg.OIDC.AdminEmails {
+		if email, ok := normalizedOIDCEmail(value); ok {
+			adminEmails[email] = struct{}{}
+		}
+	}
+	if len(adminEmails) > 0 && !slices.Contains(scopes, "email") {
+		// Discovery scopes_supported can be incomplete. Request the claim needed
+		// by this policy even when the provider does not advertise the scope.
+		scopes = append(slices.Clone(scopes), "email")
+	}
+	return &oidcAuth{pending: make(map[string]oidcTransaction), http: client, adminEmails: adminEmails,
 		verifier: provider.VerifierContext(oidc.ClientContext(context.Background(), client), &oidc.Config{ClientID: cfg.OIDC.ClientID}),
 		oauth:    oauth2.Config{ClientID: cfg.OIDC.ClientID, ClientSecret: secret, Endpoint: endpoint, RedirectURL: cfg.oidcRedirectURL(), Scopes: scopes}}, nil
 }
@@ -190,9 +204,11 @@ func (a *App) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var claims struct {
-		Name              string `json:"name"`
-		PreferredUsername string `json:"preferred_username"`
-		AuthorizedParty   string `json:"azp"`
+		Name              string          `json:"name"`
+		PreferredUsername string          `json:"preferred_username"`
+		AuthorizedParty   string          `json:"azp"`
+		Email             json.RawMessage `json:"email"`
+		EmailVerified     json.RawMessage `json:"email_verified"`
 	}
 	if identity.Claims(&claims) != nil || (len(identity.Audience) > 1 && claims.AuthorizedParty != a.Config.OIDC.ClientID) || (claims.AuthorizedParty != "" && claims.AuthorizedParty != a.Config.OIDC.ClientID) {
 		apiError(w, 401, "unauthorized", "identity provider claims rejected")
@@ -202,7 +218,18 @@ func (a *App) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = claims.PreferredUsername
 	}
-	user, err := a.State.OIDCUser(identity.Issuer, identity.Subject, name, slices.Contains(a.Config.OIDC.BootstrapAdminSubjects, identity.Subject))
+	var verified bool
+	var email string
+	if json.Unmarshal(claims.EmailVerified, &verified) != nil || !verified || json.Unmarshal(claims.Email, &email) != nil {
+		email = ""
+	}
+	verifiedEmail, _ := normalizedOIDCEmail(email)
+	_, emailAdmin := a.oidc.adminEmails[verifiedEmail]
+	user, err := a.State.OIDCUser(identity.Issuer, identity.Subject, name, controlstate.OIDCUserOptions{
+		BootstrapAdmin: slices.Contains(a.Config.OIDC.BootstrapAdminSubjects, identity.Subject),
+		VerifiedEmail:  verifiedEmail,
+		EmailAdmin:     emailAdmin,
+	})
 	if err != nil {
 		apiError(w, 403, "forbidden", "local account is unavailable")
 		return

@@ -220,12 +220,13 @@ class ChartTests(unittest.TestCase):
         render({"database": {"type": "postgres"}, "networkPolicy": {"enabled": True, "postgresEgress": []}})
 
     def test_oidc_secret_is_control_only_and_redirect_is_bound(self):
-        values = {"oidc": {"enabled": True, "issuer": "https://id.example.net", "clientId": "agents", "existingSecret": "corporate-oidc", "clientSecretKey": "client-secret", "bootstrapAdminSubjects": ["operator-subject"]}, "networkPolicy": {"enabled": True}}
+        values = {"oidc": {"enabled": True, "issuer": "https://id.example.net", "clientId": "agents", "existingSecret": "corporate-oidc", "clientSecretKey": "client-secret", "bootstrapAdminSubjects": ["operator-subject"], "adminEmails": ["operator@example.net"]}, "networkPolicy": {"enabled": True}}
         documents = render(values)
         control_config = documents[("ConfigMap", "unit-agents-control-config")]
         self.assertIn('redirectURL: "https://agents.example.com/auth/oidc/callback"', control_config)
         self.assertIn('clientSecretFile: "/etc/agents/secrets/client-secret"', control_config)
         self.assertIn('bootstrapAdminSubjects: ["operator-subject"]', control_config)
+        self.assertIn('adminEmails: ["operator@example.net"]', control_config)
         self.assertIn('name: "corporate-oidc"', documents[("Deployment", "unit-agents-control")])
         for component in ("edge", "console"):
             self.assertNotIn("corporate-oidc", documents[("Deployment", f"unit-agents-{component}")])
@@ -237,6 +238,9 @@ class ChartTests(unittest.TestCase):
         render({"oidc": {"enabled": True}}, success=False)
         render({"oidc": {"enabled": True, "issuer": "http://id.example.net", "clientId": "agents"}}, success=False)
         render({"oidc": {"scopes": ["email"]}}, success=False)
+        for email in ("example.net", "operator@", "Operator <operator@example.net>", "operator@example.net,other@example.net"):
+            with self.subTest(email=email):
+                render({"oidc": {"adminEmails": [email]}}, success=False)
 
     def test_existing_service_account_and_unknown_fields(self):
         documents = render({"serviceAccount": {"create": False, "name": "operator-account"}})

@@ -389,6 +389,9 @@ func (s *State) CreateUser(actorID, name string, admin bool) (types.User, string
 		}
 		out = types.User{ID: randomID(), Name: name, Admin: admin, CreatedAt: time.Now().UTC()}
 		snap.Users = append(snap.Users, out)
+		if err := createPersonalWorkspace(snap, out, actorID); err != nil {
+			return err
+		}
 		snap.Tokens = append(snap.Tokens, tokenRecord("user", plain, out.ID, "", "", time.Now().Add(TokenTTL)))
 		audit(snap, actorID, "user.create", out.ID)
 		return nil
@@ -398,6 +401,49 @@ func (s *State) CreateUser(actorID, name string, admin bool) (types.User, string
 	}
 	return out, plain, err
 }
+
+// createPersonalWorkspace is part of the same mutation as user registration.
+// The opaque user ID gives the new owner a stable, valid 41-byte DNS label,
+// independent of mutable or non-DNS display names and verified email claims.
+func createPersonalWorkspace(snap *types.Snapshot, owner types.User, actorID string) error {
+	name, err := label("personal-" + owner.ID)
+	if err != nil {
+		return err
+	}
+	if workspace(snap, name) != nil {
+		return problem(types.KindConflict, "personal workspace already exists")
+	}
+	w := types.Workspace{ID: randomID(), Name: name, CreatedAt: owner.CreatedAt}
+	snap.Workspaces = append(snap.Workspaces, w)
+	snap.Memberships = append(snap.Memberships, types.Membership{WorkspaceID: w.ID, UserID: owner.ID, Role: "owner"})
+	audit(snap, actorID, "workspace.personal.create", w.ID)
+	return nil
+}
+
+// Workspace names cannot be changed, and only an instance administrator can
+// explicitly create one. The reserved personal-<userID> name with exactly one
+// owner membership identifies an unshared personal space, including an explicit
+// administrator-created migration of an older user. Disabling its owner retains
+// the data for administrator recovery. Adding any other member makes the usual
+// shared-workspace last-owner protection apply again.
+func solePersonalWorkspace(snap *types.Snapshot, workspaceID, userID string) bool {
+	w := workspace(snap, workspaceID)
+	if w == nil || w.Name != "personal-"+userID {
+		return false
+	}
+	count := 0
+	for _, m := range snap.Memberships {
+		if m.WorkspaceID != w.ID {
+			continue
+		}
+		if m.UserID != userID || m.Role != "owner" {
+			return false
+		}
+		count++
+	}
+	return count == 1
+}
+
 func (s *State) CreateWorkspace(actorID, name string) (types.Workspace, error) {
 	var out types.Workspace
 	name, err := label(name)
@@ -524,7 +570,7 @@ func (s *State) DisableUser(actorID, userID string) error {
 			}
 		}
 		for _, m := range snap.Memberships {
-			if m.UserID == u.ID && m.Role == "owner" && lastOwner(snap, m.WorkspaceID, u.ID) {
+			if m.UserID == u.ID && m.Role == "owner" && lastOwner(snap, m.WorkspaceID, u.ID) && !solePersonalWorkspace(snap, m.WorkspaceID, u.ID) {
 				return problem(types.KindConflict, "transfer workspace ownership before disabling this user")
 			}
 		}

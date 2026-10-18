@@ -101,11 +101,18 @@ oidc:
   clientSecretKey: client-secret
   scopes: [openid, profile, email]
   bootstrapAdminSubjects: ["exact-subject-from-configured-issuer"]
+  adminEmails: ["operator@example.com"]
 ```
 
 IdP callback 精确注册为 `<public.serverURL>/auth/oidc/callback`。不配置 `clientSecretKey` 时使用 public-client PKCE；配置时仅 Control 挂载该 Secret，默认复用根 `existingSecret`，也可用独立 `oidc.existingSecret`。
 
-`bootstrapAdminSubjects` 仅在该 issuer/subject 首次创建本地用户时生效，不在每次登录时提升管理员权限。普通新用户没有 Workspace Membership，由管理员显式分配。服务端不保存或刷新 IdP tokens；浏览器登录会话上限为 ID token 的剩余期限与 8 小时的较小值。
+`bootstrapAdminSubjects` 仅在该 issuer/subject 首次创建本地用户时生效，不在每次登录时提升管理员权限。新 OIDC 用户和通过 API 创建的用户会获得 `personal-<userID>` Workspace，初始仅该用户为 owner；重复登录不重复创建，已有用户不补建。内部 bootstrap 管理员不自动创建个人空间。普通用户访问其他 Workspace 仍需相应的成员关系或授权；实例管理员和 Workspace owner 是不同权限。
+
+`adminEmails` 是实例管理员邮箱名单，仅接受已验证 ID token 内的 `email`，且 `email_verified` 必须为 JSON 布尔值 `true`，字符串 `"true"`、缺失或 false 均不授予权限。邮箱去除首尾空白并转小写后按完整地址匹配，不匹配域、后缀或邮箱别名，也不按邮箱合并账号。非空名单自动补充 `email` scope；即使 discovery 未列出该 scope 也会请求，IdP 必须实际返回邮箱与验证声明。已有用户加入名单后，要重新完成 OIDC 登录才提升权限；启动不根据历史邮箱声明提升用户。
+
+删除名单邮箱、更换 issuer 或关闭 OIDC 后，Control 在启动期间撤销相应的邮箱派生管理员权限，旧用户 Bearer token 的管理员能力也随之失效。下一次登录若不再提供经验证的匹配邮箱，也会撤销该来源权限。手动创建及 bootstrap 管理员来源保留。手工禁用最后一个有效管理员的保护不阻止配置策略撤权：即使会失去最后一个邮箱管理员，也必须撤销已失效的授权。应保留独立 bootstrap 管理入口；极端情况下通过可信配置及新的已验证 OIDC 登录恢复管理员权限。配置更新通过 chart checksum 触发重启，不支持进程内热加载名单。
+
+服务端不保存或刷新 IdP tokens；浏览器登录会话上限为 ID token 的剩余期限与 8 小时的较小值。
 
 Control 启动时需要 issuer discovery 可达。OIDC login state、授权 code 和浏览器会话在当前单进程内存中；Control 重启会使未完成登录和现有会话失效，需要重新登录。不能直接增加 Control 副本解决这类状态归属问题。
 

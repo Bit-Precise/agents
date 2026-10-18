@@ -122,4 +122,4 @@ CI 的 PostgreSQL 任务设置 `AGENTS_TEST_POSTGRES_DSN`，运行 `TestPostgres
 
 Control 独占身份和策略状态，Edge 通过受认证 metadata RPC 查询授权，业务请求体不发送到 Control。Control 不可达时 Edge 拒绝新流并关闭受影响业务；Edge 不可达时 Control 保留持久配置管理。
 
-启用 OIDC 后，Console 的主登录入口跳转到配置的身份提供方。身份按 issuer + subject 绑定，不按 email 合并。新用户默认没有 Workspace 权限，管理员需分配成员关系；bootstrap 管理员 subject 必须显式配置。自动化和应急管理仍可使用 Token。
+启用 OIDC 后，Console 的主登录入口跳转到配置的身份提供方。身份按 issuer + subject 绑定，不按 email 合并。新用户拥有仅自己为 owner 的 `personal-<userID>` Workspace，已有用户不补建；其他 Workspace 的访问仍需相应成员关系或授权。bootstrap 管理员 subject 必须显式配置；`oidc.adminEmails` 也可按已验证 ID token 的邮箱授予实例管理员，必须同时有布尔值 `email_verified: true`。名单移除后重启 Control 会撤销邮箱派生的管理员权限，加入名单的旧用户需重新 OIDC 登录才提升。自动化和应急管理仍可使用 Token。

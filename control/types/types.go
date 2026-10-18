@@ -99,10 +99,12 @@ type Identity struct {
 // OIDCIdentity is a persistence-only login binding. Email and display name are
 // never identity keys, and IdP claims never grant workspace membership.
 type OIDCIdentity struct {
-	Issuer    string    `json:"issuer"`
-	Subject   string    `json:"subject"`
-	UserID    string    `json:"userId"`
-	CreatedAt time.Time `json:"createdAt"`
+	Issuer         string    `json:"issuer"`
+	Subject        string    `json:"subject"`
+	UserID         string    `json:"userId"`
+	CreatedAt      time.Time `json:"createdAt"`
+	VerifiedEmail  string    `json:"verifiedEmail,omitempty"`
+	AdminFromEmail bool      `json:"adminFromEmail,omitempty"`
 }
 type Snapshot struct {
 	Revision       uint64          `json:"revision"`

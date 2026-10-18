@@ -14,6 +14,17 @@ tls:
   keyFile: ./certs/server.key
 developmentHTTP: false
 
+# 可选 OIDC；adminEmails 仅匹配 ID token 中 email_verified: true 的完整邮箱。
+# 名单新增需重新登录；移除后重启撤销邮箱派生的管理员权限（保留 bootstrap 来源）。
+# oidc:
+#   enabled: true
+#   issuer: https://id.example.com
+#   clientId: agents
+#   clientSecretFile: ./secrets/oidc-client-secret
+#   scopes: [openid, profile, email]
+#   bootstrapAdminSubjects: []
+#   adminEmails: [operator@example.com]
+
 # PostgreSQL 可替换上述 database；不是多控制节点开关：
 # database:
 #   type: postgres

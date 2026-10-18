@@ -66,8 +66,11 @@ oidc:
   existingSecret: ""
   clientSecretKey: ""
   scopes: [openid, profile, email]
-  # Exact subjects at the configured issuer; new users have no workspace membership.
+  # Exact subjects at the configured issuer; applied only on first account creation.
   bootstrapAdminSubjects: []
+  # Exact, case-insensitive emails from verified ID-token claims (email_verified: true).
+  # Fresh login grants admin; removal revokes email-derived admin on Control restart.
+  adminEmails: []
 
 serviceAccount:
   create: true

@@ -62,6 +62,7 @@ database:
 {{ if $root.Values.oidc.clientSecretKey }}  clientSecretFile: "/etc/agents/secrets/client-secret"
 {{ end }}  scopes: {{ $root.Values.oidc.scopes | toJson }}
   bootstrapAdminSubjects: {{ $root.Values.oidc.bootstrapAdminSubjects | toJson }}
+  adminEmails: {{ $root.Values.oidc.adminEmails | toJson }}
 {{ end -}}
 {{ else if eq .component "edge" -}}
 controlURL: {{ printf "http://%s-control:8080" $name | quote }}

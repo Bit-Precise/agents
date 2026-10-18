@@ -73,7 +73,7 @@ func TestSplitControlAuthenticatesInternalAPIAndStripsConsoleCredentials(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	var firstToken, firstWorkspace, foreignWorkspace string
+	var firstToken, firstUserID, firstWorkspace, foreignWorkspace string
 	for _, name := range []string{"one", "two"} {
 		user, token, err := app.State.CreateUser(adminIdentity.UserID, name, false)
 		if err != nil {
@@ -87,7 +87,7 @@ func TestSplitControlAuthenticatesInternalAPIAndStripsConsoleCredentials(t *test
 			t.Fatal(err)
 		}
 		if name == "one" {
-			firstToken, firstWorkspace = token, workspace.ID
+			firstToken, firstUserID, firstWorkspace = token, user.ID, workspace.ID
 		} else {
 			foreignWorkspace = workspace.ID
 		}
@@ -102,8 +102,13 @@ func TestSplitControlAuthenticatesInternalAPIAndStripsConsoleCredentials(t *test
 		Connections   []any `json:"connections"`
 		Flows         []any `json:"flows"`
 	}
-	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &state) != nil || state.EdgeAvailable || len(state.Workspaces) != 1 || state.Workspaces[0].ID != firstWorkspace || state.Connections == nil || state.Flows == nil || strings.Contains(response.Body.String(), foreignWorkspace) {
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &state) != nil || state.EdgeAvailable || len(state.Workspaces) != 2 || state.Connections == nil || state.Flows == nil || strings.Contains(response.Body.String(), foreignWorkspace) {
 		t.Fatalf("Edge loss did not preserve scoped management snapshot: %d %s", response.Code, response.Body.String())
+	}
+	for _, workspace := range state.Workspaces {
+		if workspace.ID != firstWorkspace && workspace.Name != "personal-"+firstUserID {
+			t.Fatal("Edge loss exposed a workspace outside the user's personal and assigned workspaces")
+		}
 	}
 }
 

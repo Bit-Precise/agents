@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/mail"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -49,6 +50,7 @@ type OIDCConfig struct {
 	RedirectURL            string   `yaml:"redirectURL"`
 	Scopes                 []string `yaml:"scopes"`
 	BootstrapAdminSubjects []string `yaml:"bootstrapAdminSubjects"`
+	AdminEmails            []string `yaml:"adminEmails"`
 }
 
 func LoadConfig(path string) (Config, error) { return LoadConfigFor(path, "serve") }
@@ -223,7 +225,27 @@ func (c Config) validateOIDC() error {
 			return errors.New("invalid OIDC bootstrap subject")
 		}
 	}
+	if len(c.OIDC.AdminEmails) > 1024 {
+		return errors.New("too many OIDC admin emails")
+	}
+	for _, email := range c.OIDC.AdminEmails {
+		if _, ok := normalizedOIDCEmail(email); !ok {
+			return errors.New("oidc.adminEmails must contain complete email addresses without display names")
+		}
+	}
 	return nil
+}
+
+func normalizedOIDCEmail(value string) (string, bool) {
+	email := strings.ToLower(strings.TrimSpace(value))
+	if email == "" || len(email) > 254 || strings.ContainsAny(email, "\r\n\x00") {
+		return "", false
+	}
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Name != "" || address.Address != email {
+		return "", false
+	}
+	return email, true
 }
 func (c Config) DBOptions() db.Options {
 	return db.Options{Driver: c.Database.Type, DSN: c.Database.DSN}

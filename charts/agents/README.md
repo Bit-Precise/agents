@@ -102,9 +102,14 @@ oidc:
   clientSecretKey: client-secret
   scopes: [openid, profile, email]
   bootstrapAdminSubjects: ["exact-subject-from-this-issuer"]
+  adminEmails: ["operator@example.com"]
 ```
 
-IdP 注册的 callback 必须为 `https://agents.example.com/auth/oidc/callback`；chart 从 `public.serverURL` 自动生成。省略 `clientSecretKey` 使用 public-client PKCE；省略 `oidc.existingSecret` 则复用根 `existingSecret`。`bootstrapAdminSubjects` 只在用户首次创建时生效，不持续提升已有用户；其它新用户没有 Workspace Membership。服务端不保存或刷新 IdP tokens，浏览器会话最长为 `min(ID token 到期时间, 8 小时)`。启动需要 issuer discovery 可达；登录 state 仅在当前单 Control 进程的内存中，重启会中断未完成的登录。
+IdP 注册的 callback 必须为 `https://agents.example.com/auth/oidc/callback`；chart 从 `public.serverURL` 自动生成。省略 `clientSecretKey` 使用 public-client PKCE；省略 `oidc.existingSecret` 则复用根 `existingSecret`。`bootstrapAdminSubjects` 只在用户首次创建时生效，不持续提升已有用户。新用户自动拥有仅自己为 owner 的 `personal-<userID>` Workspace；重复登录不会重复创建，已有用户不补建。实例管理员权限与 Workspace owner 权限独立。
+
+`adminEmails` 从已验证 ID token 的 `email` 精确匹配实例管理员名单，要求 `email_verified` 为 JSON 布尔值 `true`。地址去除首尾空白并转小写，不支持域/后缀/别名匹配，不按邮箱合并账号；身份仍按 issuer + subject 绑定。非空名单会自动请求 `email` scope，但 IdP 仍须在 ID token 中发出这两个声明。新旧用户均须完成一次新 OIDC 登录才能获得名单权限；删除邮箱、切换 issuer 或关闭 OIDC 后，Control 启动时撤销邮箱派生的管理员权限，既有用户 Bearer token 同样生效。手动创建及 bootstrap 管理员不受名单移除影响。手工禁用最后一个有效管理员的保护不阻止配置策略撤权；即使这是最后一个邮箱管理员，名单或 verified 声明失效也会撤销权限。应保留独立 bootstrap 管理入口；必要时通过可信配置及新的已验证登录恢复邮箱管理员。
+
+服务端不保存或刷新 IdP tokens，浏览器会话最长为 `min(ID token 到期时间, 8 小时)`。启动需要 issuer discovery 可达；登录 state 仅在当前单 Control 进程的内存中，重启会中断未完成的登录。
 
 Secret 以 `0440` 投影；这里依赖服务端的 Kubernetes Secret reader，不改变 agentd 客户端私有凭据检查。外部 Secret 更新不会自动重启 Pod；协调更新 internal token 后重启 Control/Edge，期间会有中断。配置变化通过 checksum 触发 Deployment 更新。
 

@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,10 @@ const oidcTestSecret = "private-oidc-client-secret"
 type testOIDCProfile struct {
 	Subject, Name, Email                                    string
 	BadIssuer, BadAudience, BadNonce, BadSignature, Expired bool
+	EmailVerified                                           json.RawMessage
+	OmitEmailVerified                                       bool
+	EmailClaim                                              json.RawMessage
+	OmitEmail                                               bool
 }
 type testOIDCCode struct {
 	Challenge, Redirect, Nonce string
@@ -44,6 +49,7 @@ type testOIDCProvider struct {
 	exchanges     int
 	pkce          bool
 	public        bool
+	scopes        string
 	key, wrongKey *rsa.PrivateKey
 }
 
@@ -62,7 +68,7 @@ func newTestOIDCProvider(t *testing.T) *testOIDCProvider {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
-			_ = json.NewEncoder(w).Encode(map[string]any{"issuer": p.server.URL, "authorization_endpoint": p.server.URL + "/authorize", "token_endpoint": p.server.URL + "/token", "jwks_uri": p.server.URL + "/keys", "response_types_supported": []string{"code"}, "subject_types_supported": []string{"public"}, "id_token_signing_alg_values_supported": []string{"RS256"}, "code_challenge_methods_supported": []string{"S256"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"issuer": p.server.URL, "authorization_endpoint": p.server.URL + "/authorize", "token_endpoint": p.server.URL + "/token", "jwks_uri": p.server.URL + "/keys", "response_types_supported": []string{"code"}, "subject_types_supported": []string{"public"}, "id_token_signing_alg_values_supported": []string{"RS256"}, "code_challenge_methods_supported": []string{"S256"}, "scopes_supported": []string{"openid"}})
 		case "/keys":
 			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "fixture", Algorithm: "RS256", Use: "sig"}}})
 		case "/authorize":
@@ -72,6 +78,7 @@ func newTestOIDCProvider(t *testing.T) *testOIDCProvider {
 				return
 			}
 			p.mu.Lock()
+			p.scopes = q.Get("scope")
 			code := randomSecret()
 			p.codes[code] = testOIDCCode{Challenge: q.Get("code_challenge"), Redirect: q.Get("redirect_uri"), Nonce: q.Get("nonce"), Profile: p.next}
 			p.mu.Unlock()
@@ -123,6 +130,16 @@ func newTestOIDCProvider(t *testing.T) *testOIDCProvider {
 				expires = time.Now().Add(-time.Minute).Unix()
 			}
 			claims := map[string]any{"iss": issuer, "sub": code.Profile.Subject, "aud": audience, "nonce": nonce, "exp": expires, "iat": time.Now().Unix(), "name": code.Profile.Name, "email": code.Profile.Email, "email_verified": true, "admin": true, "roles": []string{"admin"}}
+			if code.Profile.OmitEmail {
+				delete(claims, "email")
+			} else if code.Profile.EmailClaim != nil {
+				claims["email"] = code.Profile.EmailClaim
+			}
+			if code.Profile.OmitEmailVerified {
+				delete(claims, "email_verified")
+			} else if code.Profile.EmailVerified != nil {
+				claims["email_verified"] = code.Profile.EmailVerified
+			}
 			key := p.key
 			if code.Profile.BadSignature {
 				key = p.wrongKey
@@ -167,7 +184,7 @@ type oidcAttempt struct {
 	Cookie   *http.Cookie
 }
 
-func startOIDCFixture(t *testing.T, idp *testOIDCProvider, dbPath string) *oidcFixture {
+func startOIDCFixture(t *testing.T, idp *testOIDCProvider, dbPath string, configure ...func(*Config)) *oidcFixture {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -184,6 +201,9 @@ func startOIDCFixture(t *testing.T, idp *testOIDCProvider, dbPath string) *oidcF
 	}
 	cfg := Config{ListenAddress: listener.Addr().String(), ServerURL: base, EdgeURL: base + "/agent", DevelopmentHTTP: true, OIDC: OIDCConfig{Enabled: true, Issuer: idp.server.URL, ClientID: oidcTestClient, ClientSecretFile: secretFile, BootstrapAdminSubjects: []string{"bootstrap-subject"}}}
 	cfg.Database.Type, cfg.Database.DSN = "sqlite", dbPath
+	for _, configure := range configure {
+		configure(&cfg)
+	}
 	app, err := New(t.Context(), cfg, oidcTestAdmin)
 	if err != nil {
 		listener.Close()
@@ -318,8 +338,11 @@ func TestOIDCDiscoveryPKCEBrowserSessionSSOAndLogout(t *testing.T) {
 		t.Fatal("PKCE exchange not verified")
 	}
 	snapshot, err := f.app.State.SnapshotForUser(user.ID)
-	if err != nil || len(snapshot.Workspaces) != 0 || len(snapshot.Memberships) != 0 {
-		t.Fatal("new OIDC user gained workspace access")
+	if err != nil || len(snapshot.Workspaces) != 1 || len(snapshot.Memberships) != 1 {
+		t.Fatal("new OIDC user did not receive exactly one personal workspace")
+	}
+	if snapshot.Workspaces[0].Name != "personal-"+user.ID || snapshot.Memberships[0].UserID != user.ID || snapshot.Memberships[0].WorkspaceID != snapshot.Workspaces[0].ID || snapshot.Memberships[0].Role != "owner" {
+		t.Fatal("personal workspace is not exclusively owned by the new OIDC user")
 	}
 	f.app.auth.mu.Lock()
 	for _, session := range f.app.auth.sessions {
@@ -474,6 +497,14 @@ func TestOIDCIdentityBindingEmailCollisionAndDatabaseRestart(t *testing.T) {
 	if after.ID != first.ID || after.Name != first.Name {
 		t.Fatal("restart or changed profile broke stable issuer/subject binding")
 	}
+	snapshot, err := restarted.app.State.SnapshotForUser(first.ID)
+	if err != nil || len(snapshot.Workspaces) != 1 || len(snapshot.Memberships) != 1 {
+		t.Fatal("repeat login created extra workspaces or exposed another user's workspace")
+	}
+	// Transfer personal-workspace ownership before disabling its sole owner.
+	if _, err := restarted.app.State.SetMembership(admin.UserID, snapshot.Workspaces[0].ID, admin.UserID, "owner"); err != nil {
+		t.Fatal(err)
+	}
 	if err := restarted.app.State.DisableUser(admin.UserID, first.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -485,5 +516,135 @@ func TestOIDCIdentityBindingEmailCollisionAndDatabaseRestart(t *testing.T) {
 	otherUser, _ := other.me()
 	if otherUser.ID == second.ID {
 		t.Fatal("different issuer reused another issuer's subject binding")
+	}
+}
+
+func TestOIDCAdminEmailsRequireVerifiedExactAddressAndRequestEmailScope(t *testing.T) {
+	idp := newTestOIDCProvider(t)
+	f := startOIDCFixture(t, idp, filepath.Join(t.TempDir(), "control.db"), func(cfg *Config) {
+		cfg.OIDC.AdminEmails = []string{"  Operator@EXAMPLE.test  "}
+		cfg.OIDC.Scopes = []string{"openid"}
+	})
+	cases := []struct {
+		name    string
+		profile testOIDCProfile
+		admin   bool
+	}{
+		{name: "verified", profile: testOIDCProfile{Email: " OPERATOR@example.test "}, admin: true},
+		{name: "false", profile: testOIDCProfile{Email: "operator@example.test", EmailVerified: json.RawMessage(`false`)}},
+		{name: "missing", profile: testOIDCProfile{Email: "operator@example.test", OmitEmailVerified: true}},
+		{name: "null", profile: testOIDCProfile{Email: "operator@example.test", EmailVerified: json.RawMessage(`null`)}},
+		{name: "string-true", profile: testOIDCProfile{Email: "operator@example.test", EmailVerified: json.RawMessage(`"true"`)}},
+		{name: "numeric", profile: testOIDCProfile{Email: "operator@example.test", EmailVerified: json.RawMessage(`1`)}},
+		{name: "empty-email", profile: testOIDCProfile{}},
+		{name: "missing-email", profile: testOIDCProfile{OmitEmail: true}},
+		{name: "null-email", profile: testOIDCProfile{EmailClaim: json.RawMessage(`null`)}},
+		{name: "numeric-email", profile: testOIDCProfile{EmailClaim: json.RawMessage(`123`)}},
+		{name: "invalid-email", profile: testOIDCProfile{Email: "Operator <operator@example.test>"}},
+		{name: "same-domain", profile: testOIDCProfile{Email: "another@example.test"}},
+		{name: "suffix", profile: testOIDCProfile{Email: "operator@example.test.evil.test"}},
+		{name: "plus-alias", profile: testOIDCProfile{Email: "operator+alias@example.test"}},
+		{name: "operator@example.test", profile: testOIDCProfile{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.profile.Subject, tc.profile.Name = tc.name, tc.name
+			f.finish(f.begin(tc.profile, ""), 303)
+			user, _ := f.me()
+			if user.Admin != tc.admin {
+				t.Fatalf("admin=%v, want %v", user.Admin, tc.admin)
+			}
+		})
+	}
+	idp.mu.Lock()
+	scopes := strings.Fields(idp.scopes)
+	idp.mu.Unlock()
+	if !slices.Contains(scopes, "email") {
+		t.Fatal("admin email policy did not request email scope despite incomplete discovery")
+	}
+}
+
+func TestOIDCExistingUserEmailAdminRequiresFreshVerifiedLogin(t *testing.T) {
+	idp := newTestOIDCProvider(t)
+	path := filepath.Join(t.TempDir(), "control.db")
+	profile := testOIDCProfile{Subject: "existing-user", Email: "operator@example.test"}
+	f := startOIDCFixture(t, idp, path)
+	f.finish(f.begin(profile, ""), 303)
+	before, _ := f.me()
+	if before.Admin {
+		t.Fatal("unlisted email granted admin")
+	}
+	f.close()
+	f = startOIDCFixture(t, idp, path, func(cfg *Config) {
+		cfg.OIDC.AdminEmails = []string{profile.Email}
+	})
+	user, err := f.app.State.CheckUser(before.ID)
+	if err != nil || user.Admin {
+		t.Fatal("configuration addition promoted a user from stale stored claims")
+	}
+	f.finish(f.begin(profile, ""), 303)
+	promoted, _ := f.me()
+	if promoted.ID != before.ID || !promoted.Admin {
+		t.Fatal("fresh verified login did not promote existing local identity")
+	}
+	profile.EmailVerified = json.RawMessage(`false`)
+	f.finish(f.begin(profile, ""), 303)
+	demoted, _ := f.me()
+	if demoted.ID != before.ID || demoted.Admin {
+		t.Fatal("unverified email retained email-derived admin")
+	}
+}
+
+func TestOIDCAdminEmailRemovalRevokesExistingBearerOnStartup(t *testing.T) {
+	idp := newTestOIDCProvider(t)
+	for _, disabled := range []bool{false, true} {
+		name := "allowlist-removed"
+		if disabled {
+			name = "oidc-disabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "control.db")
+			f := startOIDCFixture(t, idp, path, func(cfg *Config) {
+				cfg.OIDC.AdminEmails = []string{"operator@example.test"}
+			})
+			f.finish(f.begin(testOIDCProfile{Subject: "email-admin", Email: "operator@example.test"}, ""), 303)
+			user, _ := f.me()
+			if !user.Admin {
+				t.Fatal("allowlisted user was not promoted")
+			}
+			token, err := f.app.State.RotateUserToken(user.ID, user.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkCreateUser := func(f *oidcFixture, want int) {
+				t.Helper()
+				request := httptest.NewRequest("POST", f.cfg.ServerURL+"/api/v1/users", strings.NewReader(`{"name":"created-by-email-admin"}`))
+				request.Header.Set("Authorization", "Bearer "+token)
+				request.Header.Set("Content-Type", "application/json")
+				recorder := httptest.NewRecorder()
+				f.app.Handler().ServeHTTP(recorder, request)
+				if recorder.Code != want {
+					t.Fatalf("bearer admin operation returned %d, want %d: %s", recorder.Code, want, recorder.Body.String())
+				}
+			}
+			checkCreateUser(f, 201)
+			f.close()
+			restarted := startOIDCFixture(t, idp, path, func(cfg *Config) {
+				cfg.OIDC.Enabled = !disabled
+			})
+			checkCreateUser(restarted, 403)
+			identity, err := restarted.app.State.Identity(token)
+			if err != nil || identity.UserID != user.ID {
+				t.Fatal("demotion should preserve the user's ordinary bearer authentication")
+			}
+			admin, err := restarted.app.State.Identity(oidcTestAdmin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bootstrap, err := restarted.app.State.CheckUser(admin.UserID)
+			if err != nil || !bootstrap.Admin {
+				t.Fatal("email policy removal affected the bootstrap administrator")
+			}
+		})
 	}
 }

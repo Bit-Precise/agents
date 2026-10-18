@@ -145,8 +145,11 @@ const accessTabs: Record<AccessTab, string> = {
 const actionLabels: Record<string, string> = {
   bootstrap: "初始化实例",
   "workspace.create": "创建工作空间",
+  "workspace.personal.create": "创建个人默认工作空间",
   "user.create": "创建用户",
   "user.oidc.create": "单点登录创建用户",
+  "user.oidc.admin.grant": "授予邮箱名单管理员权限",
+  "user.oidc.admin.revoke": "撤销邮箱名单管理员权限",
   "user.disable": "停用用户",
   "membership.set": "更新成员角色",
   "membership.remove": "移除成员",

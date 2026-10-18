@@ -323,6 +323,17 @@
             "minLength": 1,
             "maxLength": 512
           }
+        },
+        "adminEmails": {
+          "type": "array",
+          "maxItems": 1024,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 512,
+            "pattern": "^[ \\t]*[^\\s<>(),;@]+@[^\\s<>(),;@]+[ \\t]*$"
+          }
         }
       },
       "additionalProperties": false,
@@ -333,7 +344,8 @@
         "existingSecret",
         "clientSecretKey",
         "scopes",
-        "bootstrapAdminSubjects"
+        "bootstrapAdminSubjects",
+        "adminEmails"
       ]
     },
     "serviceAccount": {

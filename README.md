@@ -63,6 +63,6 @@ helm lint charts/agents --strict
 
 Console 使用 React、TypeScript、shadcn/ui。前端 API 类型、客户端和操作函数由 [OpenAPI 契约](api/openapi.json) 生成；修改契约后执行 `make generate`，CI 会检查生成文件与构建产物是否同步。
 
-认证支持标准 OIDC discovery、授权码 + PKCE、state/nonce 和 ID token 校验，并按 issuer + subject 绑定用户。新用户默认无 Workspace 权限；配置中的 bootstrap 管理员 subject 仅首次创建账户时生效。Token 登录保留给自动化与应急管理。
+认证支持标准 OIDC discovery、授权码 + PKCE、state/nonce 和 ID token 校验，并按 issuer + subject 绑定用户。新用户获得仅自己为 owner 的 `personal-<userID>` Workspace，已有用户不补建。配置中的 bootstrap 管理员 subject 仅首次创建账户时生效；`oidc.adminEmails` 可按已验证邮箱授予实例管理员，要求 ID token 的 `email_verified` 为布尔值 `true`，移除名单后重启 Control 会撤销邮箱派生的管理员权限。Token 登录保留给自动化与应急管理。
 
 目前没有真实 CDN 兼容性验收、自动秘密轮换或多 Edge 目录。OIDC 增加显式 v1→v2 数据库迁移，保留现有用户、设备、授权和凭据。Control 启动时需要身份提供方 discovery 可达；浏览器会话不超过 ID token 到期时间及 8 小时，不持久化 IdP tokens。

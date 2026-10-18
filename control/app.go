@@ -75,6 +75,14 @@ func newApp(ctx context.Context, cfg Config, adminToken, internalToken string, s
 		s.Close()
 		return nil, err
 	}
+	issuer, adminEmails := "", []string(nil)
+	if cfg.OIDC.Enabled {
+		issuer, adminEmails = cfg.OIDC.Issuer, cfg.OIDC.AdminEmails
+	}
+	if err = s.ReconcileOIDCAdminEmails(issuer, adminEmails); err != nil {
+		s.Close()
+		return nil, err
+	}
 	a := &App{Config: cfg, State: s, auth: newBrowserAuth(), router: http.NewServeMux(), assets: assets.Handler(), separate: separate, oidc: oidcAuth}
 	if separate {
 		status, err := controlrpc.NewClient(cfg.EdgeInternalURL, internalToken)
