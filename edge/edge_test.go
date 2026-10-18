@@ -657,15 +657,31 @@ func TestUnavailableExactAgentDoesNotFallBack(t *testing.T) {
 	}
 }
 
-type brokenBody struct{ closed atomic.Bool }
+// brokenBody fails once ready is closed, so the failure always meets a
+// provider stream that is already open rather than racing its creation.
+type brokenBody struct {
+	closed atomic.Bool
+	ready  <-chan struct{}
+}
 
-func (b *brokenBody) Read([]byte) (int, error) { return 0, errors.New("injected request-body failure") }
-func (b *brokenBody) Close() error             { b.closed.Store(true); return nil }
+func (b *brokenBody) Read([]byte) (int, error) {
+	if b.ready != nil {
+		select {
+		case <-b.ready:
+		case <-time.After(5 * time.Second):
+		}
+	}
+	return 0, errors.New("injected request-body failure")
+}
+func (b *brokenBody) Close() error { b.closed.Store(true); return nil }
 
 func TestServeBodyFailureClosesPendingResources(t *testing.T) {
 	h := newHarness(t)
 	providerCanceled := make(chan struct{}, 1)
+	opened := make(chan struct{})
+	var once sync.Once
 	h.provider(t, "office", "c", nil, func(flow *connection.Stream) {
+		once.Do(func() { close(opened) })
 		request, err := http.ReadRequest(bufio.NewReader(flow))
 		if err == nil {
 			_, _ = io.Copy(io.Discard, request.Body)
@@ -674,7 +690,7 @@ func TestServeBodyFailureClosesPendingResources(t *testing.T) {
 		<-flow.Context().Done()
 		providerCanceled <- struct{}{}
 	})
-	body := new(brokenBody)
+	body := &brokenBody{ready: opened}
 	request := httptest.NewRequest(http.MethodPost, "http://demo.workspace1.instance.example/upload", body)
 	request.ContentLength = 10
 	response := httptest.NewRecorder()
