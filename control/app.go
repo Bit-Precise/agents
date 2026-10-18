@@ -176,7 +176,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 			serverapi.Handler().ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") {
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/auth/") {
 			a.router.ServeHTTP(w, r)
 			return
 		}

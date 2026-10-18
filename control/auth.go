@@ -178,7 +178,8 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 429, "capacity", "browser session limit reached")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"user": user, "csrfToken": s.CSRF})
+	w.Header().Set("Location", "/v1/sessions/current")
+	writeJSON(w, 201, map[string]any{"user": user, "csrfToken": s.CSRF})
 }
 func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 	if _, _, err := a.actor(r, true); err != nil {

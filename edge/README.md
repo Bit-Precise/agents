@@ -4,7 +4,10 @@
 session/flow directory. Mount `Handler()` on a separate HTTPS endpoint and run
 `Run(ctx)` once. The browser gateway calls `ServeHTTP(w, r, verifiedUserID)`;
 empty user IDs remain anonymous and must be allowed by control. `Snapshot()`
-contains no tokens and must be filtered by the caller's Workspace visibility.
+contains no tokens and requires explicit caller filtering: ordinary users see
+their own Agent connections or connections in Workspaces they manage; flows are
+visible to their consumer user or Workspace managers, not merely to the provider
+Agent owner. Instance administrators can inspect the complete runtime view.
 `Shutdown(ctx)` closes accepted and pending connections, active and opening flows,
 request bodies, and waits for Edge workers. The surrounding HTTP server is owned
 by the embedding application.

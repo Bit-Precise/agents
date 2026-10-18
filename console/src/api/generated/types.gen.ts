@@ -208,24 +208,6 @@ export type FlowStatus = {
     hardDeadline: string;
 };
 
-export type State = {
-    users: Array<User> | null;
-    workspaces: Array<Workspace> | null;
-    memberships: Array<Membership> | null;
-    agents: Array<Agent> | null;
-    enrollmentKeys: Array<EnrollmentKey> | null;
-    services: Array<Service> | null;
-    egressRoutes: Array<EgressRoute> | null;
-    grants: Array<Grant> | null;
-    audit: Array<Audit> | null;
-    connections: Array<ConnectionStatus> | null;
-    flows: Array<FlowStatus> | null;
-    revision: number;
-    user: User;
-    serverURL: string;
-    edgeAvailable: boolean;
-};
-
 export type Info = {
     serverURL: string;
     edgeURL: string;
@@ -313,136 +295,247 @@ export type CreateGrant = {
     expiresAt: string;
 };
 
-export type GetInfoData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/info';
+export type Pagination = {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
 };
 
-export type GetInfoErrors = {
-    /**
-     * API error
-     */
-    default: Error;
+export type InstanceStatus = {
+    revision: number;
+    edgeAvailable: boolean;
 };
 
-export type GetInfoError = GetInfoErrors[keyof GetInfoErrors];
-
-export type GetInfoResponses = {
-    /**
-     * Success
-     */
-    200: Info;
+export type UpdateUser = {
+    disabled: true;
 };
 
-export type GetInfoResponse = GetInfoResponses[keyof GetInfoResponses];
-
-export type LoginData = {
-    body: Token;
-    path?: never;
-    query?: never;
-    url: '/api/v1/login';
+export type PutMembership = {
+    role: 'owner' | 'maintainer' | 'developer' | 'guest';
 };
 
-export type LoginErrors = {
-    /**
-     * API error
-     */
-    default: Error;
+export type UpdateAgent = {
+    status: 'revoked';
 };
 
-export type LoginError = LoginErrors[keyof LoginErrors];
-
-export type LoginResponses = {
-    /**
-     * Success
-     */
-    200: Session;
+export type PutAgentApproval = {
+    expectedDesired: AgentConfig;
 };
 
-export type LoginResponse = LoginResponses[keyof LoginResponses];
-
-export type LogoutData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/v1/logout';
+export type UpdateEnrollmentKey = {
+    revoked: true;
 };
 
-export type LogoutErrors = {
-    /**
-     * API error
-     */
-    default: Error;
+export type UpdateService = {
+    enabled: boolean;
 };
 
-export type LogoutError = LogoutErrors[keyof LogoutErrors];
-
-export type LogoutResponses = {
-    /**
-     * Success
-     */
-    204: void;
+export type UpdateEgressRoute = {
+    enabled: boolean;
 };
 
-export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
-
-export type GetMeData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/me';
+export type UpdateGrant = {
+    revoked: true;
 };
 
-export type GetMeErrors = {
-    /**
-     * API error
-     */
-    default: Error;
+export type UsersPage = {
+    items: Array<User>;
+    pagination: Pagination;
 };
 
-export type GetMeError = GetMeErrors[keyof GetMeErrors];
-
-export type GetMeResponses = {
-    /**
-     * Success
-     */
-    200: Session;
+export type WorkspacesPage = {
+    items: Array<Workspace>;
+    pagination: Pagination;
 };
 
-export type GetMeResponse = GetMeResponses[keyof GetMeResponses];
-
-export type GetStateData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/state';
+export type MembershipsPage = {
+    items: Array<Membership>;
+    pagination: Pagination;
 };
 
-export type GetStateErrors = {
-    /**
-     * API error
-     */
-    default: Error;
+export type AgentsPage = {
+    items: Array<Agent>;
+    pagination: Pagination;
 };
 
-export type GetStateError = GetStateErrors[keyof GetStateErrors];
-
-export type GetStateResponses = {
-    /**
-     * Success
-     */
-    200: State;
+export type EnrollmentKeysPage = {
+    items: Array<EnrollmentKey>;
+    pagination: Pagination;
 };
 
-export type GetStateResponse = GetStateResponses[keyof GetStateResponses];
+export type ServicesPage = {
+    items: Array<Service>;
+    pagination: Pagination;
+};
+
+export type EgressRoutesPage = {
+    items: Array<EgressRoute>;
+    pagination: Pagination;
+};
+
+export type GrantsPage = {
+    items: Array<Grant>;
+    pagination: Pagination;
+};
+
+export type ConnectionsPage = {
+    items: Array<ConnectionStatus>;
+    pagination: Pagination;
+};
+
+export type FlowsPage = {
+    items: Array<FlowStatus>;
+    pagination: Pagination;
+};
+
+export type AuditEventsPage = {
+    items: Array<Audit>;
+    pagination: Pagination;
+};
+
+export type IngressView = {
+    agentId: string;
+    agent: AgentSummary;
+    enabled: boolean;
+    approvedRevision: number;
+    status: string;
+    id: string;
+    workspaceId: string;
+};
+
+export type EgressView = {
+    agentId: string;
+    agent: AgentSummary;
+    enabled: boolean;
+    approvedRevision: number;
+    status: string;
+    id: string;
+    workspaceId: string;
+};
+
+export type ServerView = {
+    serviceId: string;
+    agentId: string;
+    agent: AgentSummary;
+    name: string;
+    hostname: string;
+    enabled: boolean;
+    id: string;
+    workspaceId: string;
+};
+
+export type RouteView = {
+    id: string;
+    kind: 'serve' | 'egress';
+    targetType: 'server' | 'egress';
+    targetId: string;
+    agentId: string;
+    rule: RouteRule;
+    enabled: boolean;
+    priority: number;
+    workspaceId: string;
+    name: string;
+};
+
+export type WorkspaceAgentsPage = {
+    items: Array<Agent>;
+    pagination: Pagination;
+};
+
+export type WorkspaceIngressesPage = {
+    items: Array<IngressView>;
+    pagination: Pagination;
+};
+
+export type WorkspaceServersPage = {
+    items: Array<ServerView>;
+    pagination: Pagination;
+};
+
+export type WorkspaceEgressesPage = {
+    items: Array<EgressView>;
+    pagination: Pagination;
+};
+
+export type WorkspaceRoutesPage = {
+    items: Array<RouteView>;
+    pagination: Pagination;
+};
+
+export type AgentSummary = {
+    id: string;
+    name: string;
+    status: 'pending' | 'active' | 'revoked';
+    roles: Array<'ingress' | 'serve' | 'egress'>;
+    pendingApproval: boolean;
+};
+
+export type CreateWorkspaceEnrollmentKey = {
+    userId: string;
+    roles: Array<'ingress' | 'serve' | 'egress'>;
+    autoApprove?: boolean;
+    maxUses: number;
+    expiresAt: string;
+};
+
+export type CreateWorkspaceEgressRoute = {
+    agentId: string;
+    name: string;
+    rule: Rule;
+    priority: number;
+    enabled?: boolean;
+};
+
+export type CreateWorkspaceGrant = {
+    resourceType: 'service' | 'egress';
+    resourceId: string;
+    subjectType: 'user' | 'workspace' | 'anonymous';
+    subjectId?: string;
+    startsAt: string;
+    expiresAt: string;
+};
+
+export type RouteRule = {
+    domain: Domain;
+    ports: Array<number>;
+    protocol: 'http' | 'tls';
+};
+
+export type ServersPage = {
+    items: Array<ServerView>;
+    pagination: Pagination;
+};
+
+export type RoutesPage = {
+    items: Array<RouteView>;
+    pagination: Pagination;
+};
+
+export type UpdateServer = {
+    enabled: boolean;
+};
+
+export type UpdateRoute = {
+    enabled: boolean;
+};
+
+export type CreateAdminRoute = {
+    workspaceId: string;
+    agentId: string;
+    name: string;
+    rule: Rule;
+    priority: number;
+    kind: 'egress';
+};
+
+export type CreateWorkspaceRoute = {
+    agentId: string;
+    name: string;
+    rule: Rule;
+    priority: number;
+    kind: 'egress';
+};
 
 export type EnrollData = {
     body: EnrollRequest;
@@ -525,556 +618,6 @@ export type UpdateAgentConfigResponses = {
 
 export type UpdateAgentConfigResponse = UpdateAgentConfigResponses[keyof UpdateAgentConfigResponses];
 
-export type CreateUserData = {
-    body: CreateUser;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/v1/users';
-};
-
-export type CreateUserErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type CreateUserError = CreateUserErrors[keyof CreateUserErrors];
-
-export type CreateUserResponses = {
-    /**
-     * Success
-     */
-    201: UserToken;
-};
-
-export type CreateUserResponse = CreateUserResponses[keyof CreateUserResponses];
-
-export type DisableUserData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/users/{id}';
-};
-
-export type DisableUserErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type DisableUserError = DisableUserErrors[keyof DisableUserErrors];
-
-export type DisableUserResponses = {
-    /**
-     * Success
-     */
-    200: Ok;
-};
-
-export type DisableUserResponse = DisableUserResponses[keyof DisableUserResponses];
-
-export type RotateUserTokenData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/users/{id}/token';
-};
-
-export type RotateUserTokenErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type RotateUserTokenError = RotateUserTokenErrors[keyof RotateUserTokenErrors];
-
-export type RotateUserTokenResponses = {
-    /**
-     * Success
-     */
-    201: Token;
-};
-
-export type RotateUserTokenResponse = RotateUserTokenResponses[keyof RotateUserTokenResponses];
-
-export type CreateWorkspaceData = {
-    body: CreateWorkspace;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/v1/workspaces';
-};
-
-export type CreateWorkspaceErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type CreateWorkspaceError = CreateWorkspaceErrors[keyof CreateWorkspaceErrors];
-
-export type CreateWorkspaceResponses = {
-    /**
-     * Success
-     */
-    201: Workspace;
-};
-
-export type CreateWorkspaceResponse = CreateWorkspaceResponses[keyof CreateWorkspaceResponses];
-
-export type SetMembershipData = {
-    body: Membership;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/v1/memberships';
-};
-
-export type SetMembershipErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type SetMembershipError = SetMembershipErrors[keyof SetMembershipErrors];
-
-export type SetMembershipResponses = {
-    /**
-     * Success
-     */
-    201: Membership;
-};
-
-export type SetMembershipResponse = SetMembershipResponses[keyof SetMembershipResponses];
-
-export type RemoveMembershipData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        workspace: string;
-        user: string;
-    };
-    query?: never;
-    url: '/api/v1/memberships/{workspace}/{user}';
-};
-
-export type RemoveMembershipErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type RemoveMembershipError = RemoveMembershipErrors[keyof RemoveMembershipErrors];
-
-export type RemoveMembershipResponses = {
-    /**
-     * Success
-     */
-    200: Ok;
-};
-
-export type RemoveMembershipResponse = RemoveMembershipResponses[keyof RemoveMembershipResponses];
-
-export type CreateEnrollmentKeyData = {
-    body: CreateEnrollmentKey;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/v1/enrollment-keys';
-};
-
-export type CreateEnrollmentKeyErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type CreateEnrollmentKeyError = CreateEnrollmentKeyErrors[keyof CreateEnrollmentKeyErrors];
-
-export type CreateEnrollmentKeyResponses = {
-    /**
-     * Success
-     */
-    201: CreatedEnrollmentKey;
-};
-
-export type CreateEnrollmentKeyResponse = CreateEnrollmentKeyResponses[keyof CreateEnrollmentKeyResponses];
-
-export type RevokeEnrollmentKeyData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/enrollment-keys/{id}';
-};
-
-export type RevokeEnrollmentKeyErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type RevokeEnrollmentKeyError = RevokeEnrollmentKeyErrors[keyof RevokeEnrollmentKeyErrors];
-
-export type RevokeEnrollmentKeyResponses = {
-    /**
-     * Success
-     */
-    200: Ok;
-};
-
-export type RevokeEnrollmentKeyResponse = RevokeEnrollmentKeyResponses[keyof RevokeEnrollmentKeyResponses];
-
-export type ApproveAgentData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/agents/{id}/approve';
-};
-
-export type ApproveAgentErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type ApproveAgentError = ApproveAgentErrors[keyof ApproveAgentErrors];
-
-export type ApproveAgentResponses = {
-    /**
-     * Success
-     */
-    200: Agent;
-};
-
-export type ApproveAgentResponse = ApproveAgentResponses[keyof ApproveAgentResponses];
-
-export type RevokeAgentData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/agents/{id}/revoke';
-};
-
-export type RevokeAgentErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type RevokeAgentError = RevokeAgentErrors[keyof RevokeAgentErrors];
-
-export type RevokeAgentResponses = {
-    /**
-     * Success
-     */
-    200: Ok;
-};
-
-export type RevokeAgentResponse = RevokeAgentResponses[keyof RevokeAgentResponses];
-
-export type CreateEgressRouteData = {
-    body: CreateEgressRoute;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/v1/egress-routes';
-};
-
-export type CreateEgressRouteErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type CreateEgressRouteError = CreateEgressRouteErrors[keyof CreateEgressRouteErrors];
-
-export type CreateEgressRouteResponses = {
-    /**
-     * Success
-     */
-    201: EgressRoute;
-};
-
-export type CreateEgressRouteResponse = CreateEgressRouteResponses[keyof CreateEgressRouteResponses];
-
-export type DisableEgressRouteData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/egress-routes/{id}';
-};
-
-export type DisableEgressRouteErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type DisableEgressRouteError = DisableEgressRouteErrors[keyof DisableEgressRouteErrors];
-
-export type DisableEgressRouteResponses = {
-    /**
-     * Success
-     */
-    200: EgressRoute;
-};
-
-export type DisableEgressRouteResponse = DisableEgressRouteResponses[keyof DisableEgressRouteResponses];
-
-export type EnableEgressRouteData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/egress-routes/{id}/enable';
-};
-
-export type EnableEgressRouteErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type EnableEgressRouteError = EnableEgressRouteErrors[keyof EnableEgressRouteErrors];
-
-export type EnableEgressRouteResponses = {
-    /**
-     * Success
-     */
-    200: EgressRoute;
-};
-
-export type EnableEgressRouteResponse = EnableEgressRouteResponses[keyof EnableEgressRouteResponses];
-
-export type DisableServiceData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/services/{id}';
-};
-
-export type DisableServiceErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type DisableServiceError = DisableServiceErrors[keyof DisableServiceErrors];
-
-export type DisableServiceResponses = {
-    /**
-     * Success
-     */
-    200: Service;
-};
-
-export type DisableServiceResponse = DisableServiceResponses[keyof DisableServiceResponses];
-
-export type EnableServiceData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/services/{id}/enable';
-};
-
-export type EnableServiceErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type EnableServiceError = EnableServiceErrors[keyof EnableServiceErrors];
-
-export type EnableServiceResponses = {
-    /**
-     * Success
-     */
-    200: Service;
-};
-
-export type EnableServiceResponse = EnableServiceResponses[keyof EnableServiceResponses];
-
-export type CreateGrantData = {
-    body: CreateGrant;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/v1/grants';
-};
-
-export type CreateGrantErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type CreateGrantError = CreateGrantErrors[keyof CreateGrantErrors];
-
-export type CreateGrantResponses = {
-    /**
-     * Success
-     */
-    201: Grant;
-};
-
-export type CreateGrantResponse = CreateGrantResponses[keyof CreateGrantResponses];
-
-export type RevokeGrantData = {
-    body?: never;
-    headers?: {
-        /**
-         * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
-         */
-        'X-CSRF-Token'?: string;
-    };
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/api/v1/grants/{id}';
-};
-
-export type RevokeGrantErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type RevokeGrantError = RevokeGrantErrors[keyof RevokeGrantErrors];
-
-export type RevokeGrantResponses = {
-    /**
-     * Success
-     */
-    200: Ok;
-};
-
-export type RevokeGrantResponse = RevokeGrantResponses[keyof RevokeGrantResponses];
-
 export type OidcLoginData = {
     body?: never;
     path?: never;
@@ -1145,3 +688,2508 @@ export type AuthorizeServiceResponses = {
      */
     default: unknown;
 };
+
+export type GetInstanceData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/instance';
+};
+
+export type GetInstanceErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetInstanceError = GetInstanceErrors[keyof GetInstanceErrors];
+
+export type GetInstanceResponses = {
+    /**
+     * Success
+     */
+    200: Info;
+};
+
+export type GetInstanceResponse = GetInstanceResponses[keyof GetInstanceResponses];
+
+export type GetInstanceStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/instance/status';
+};
+
+export type GetInstanceStatusErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetInstanceStatusError = GetInstanceStatusErrors[keyof GetInstanceStatusErrors];
+
+export type GetInstanceStatusResponses = {
+    /**
+     * Success
+     */
+    200: InstanceStatus;
+};
+
+export type GetInstanceStatusResponse = GetInstanceStatusResponses[keyof GetInstanceStatusResponses];
+
+export type CreateSessionData = {
+    body: Token;
+    path?: never;
+    query?: never;
+    url: '/v1/sessions';
+};
+
+export type CreateSessionErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateSessionError = CreateSessionErrors[keyof CreateSessionErrors];
+
+export type CreateSessionResponses = {
+    /**
+     * Success
+     */
+    201: Session;
+};
+
+export type CreateSessionResponse = CreateSessionResponses[keyof CreateSessionResponses];
+
+export type DeleteCurrentSessionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/sessions/current';
+};
+
+export type DeleteCurrentSessionErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type DeleteCurrentSessionError = DeleteCurrentSessionErrors[keyof DeleteCurrentSessionErrors];
+
+export type DeleteCurrentSessionResponses = {
+    /**
+     * Success
+     */
+    204: void;
+};
+
+export type DeleteCurrentSessionResponse = DeleteCurrentSessionResponses[keyof DeleteCurrentSessionResponses];
+
+export type GetCurrentSessionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/sessions/current';
+};
+
+export type GetCurrentSessionErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetCurrentSessionError = GetCurrentSessionErrors[keyof GetCurrentSessionErrors];
+
+export type GetCurrentSessionResponses = {
+    /**
+     * Success
+     */
+    200: Session;
+};
+
+export type GetCurrentSessionResponse = GetCurrentSessionResponses[keyof GetCurrentSessionResponses];
+
+export type GetCurrentUserData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/users/me';
+};
+
+export type GetCurrentUserErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetCurrentUserError = GetCurrentUserErrors[keyof GetCurrentUserErrors];
+
+export type GetCurrentUserResponses = {
+    /**
+     * Success
+     */
+    200: User;
+};
+
+export type GetCurrentUserResponse = GetCurrentUserResponses[keyof GetCurrentUserResponses];
+
+export type CreateCurrentUserTokenData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/v1/users/me/tokens';
+};
+
+export type CreateCurrentUserTokenErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateCurrentUserTokenError = CreateCurrentUserTokenErrors[keyof CreateCurrentUserTokenErrors];
+
+export type CreateCurrentUserTokenResponses = {
+    /**
+     * Success
+     */
+    201: Token;
+};
+
+export type CreateCurrentUserTokenResponse = CreateCurrentUserTokenResponses[keyof CreateCurrentUserTokenResponses];
+
+export type ListAdminUsersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, createdAt. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        q?: string;
+        disabled?: boolean;
+        admin?: boolean;
+        workspaceId?: string;
+    };
+    url: '/v1/admin/users';
+};
+
+export type ListAdminUsersErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminUsersError = ListAdminUsersErrors[keyof ListAdminUsersErrors];
+
+export type ListAdminUsersResponses = {
+    /**
+     * Success
+     */
+    200: UsersPage;
+};
+
+export type ListAdminUsersResponse = ListAdminUsersResponses[keyof ListAdminUsersResponses];
+
+export type CreateAdminUserData = {
+    body: CreateUser;
+    path?: never;
+    query?: never;
+    url: '/v1/admin/users';
+};
+
+export type CreateAdminUserErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateAdminUserError = CreateAdminUserErrors[keyof CreateAdminUserErrors];
+
+export type CreateAdminUserResponses = {
+    /**
+     * Success
+     */
+    201: UserToken;
+};
+
+export type CreateAdminUserResponse = CreateAdminUserResponses[keyof CreateAdminUserResponses];
+
+export type GetAdminUserData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/users/{id}';
+};
+
+export type GetAdminUserErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminUserError = GetAdminUserErrors[keyof GetAdminUserErrors];
+
+export type GetAdminUserResponses = {
+    /**
+     * Success
+     */
+    200: User;
+};
+
+export type GetAdminUserResponse = GetAdminUserResponses[keyof GetAdminUserResponses];
+
+export type UpdateAdminUserData = {
+    body: UpdateUser;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/users/{id}';
+};
+
+export type UpdateAdminUserErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateAdminUserError = UpdateAdminUserErrors[keyof UpdateAdminUserErrors];
+
+export type UpdateAdminUserResponses = {
+    /**
+     * Success
+     */
+    200: User;
+};
+
+export type UpdateAdminUserResponse = UpdateAdminUserResponses[keyof UpdateAdminUserResponses];
+
+export type CreateAdminUserTokenData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/users/{id}/tokens';
+};
+
+export type CreateAdminUserTokenErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateAdminUserTokenError = CreateAdminUserTokenErrors[keyof CreateAdminUserTokenErrors];
+
+export type CreateAdminUserTokenResponses = {
+    /**
+     * Success
+     */
+    201: Token;
+};
+
+export type CreateAdminUserTokenResponse = CreateAdminUserTokenResponses[keyof CreateAdminUserTokenResponses];
+
+export type ListWorkspacesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, createdAt. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        q?: string;
+        userId?: string;
+        ownerId?: string;
+    };
+    url: '/v1/workspaces';
+};
+
+export type ListWorkspacesErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspacesError = ListWorkspacesErrors[keyof ListWorkspacesErrors];
+
+export type ListWorkspacesResponses = {
+    /**
+     * Success
+     */
+    200: WorkspacesPage;
+};
+
+export type ListWorkspacesResponse = ListWorkspacesResponses[keyof ListWorkspacesResponses];
+
+export type ListAdminWorkspacesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, createdAt. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        q?: string;
+        userId?: string;
+        ownerId?: string;
+    };
+    url: '/v1/admin/workspaces';
+};
+
+export type ListAdminWorkspacesErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminWorkspacesError = ListAdminWorkspacesErrors[keyof ListAdminWorkspacesErrors];
+
+export type ListAdminWorkspacesResponses = {
+    /**
+     * Success
+     */
+    200: WorkspacesPage;
+};
+
+export type ListAdminWorkspacesResponse = ListAdminWorkspacesResponses[keyof ListAdminWorkspacesResponses];
+
+export type CreateAdminWorkspaceData = {
+    body: CreateWorkspace;
+    path?: never;
+    query?: never;
+    url: '/v1/admin/workspaces';
+};
+
+export type CreateAdminWorkspaceErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateAdminWorkspaceError = CreateAdminWorkspaceErrors[keyof CreateAdminWorkspaceErrors];
+
+export type CreateAdminWorkspaceResponses = {
+    /**
+     * Success
+     */
+    201: Workspace;
+};
+
+export type CreateAdminWorkspaceResponse = CreateAdminWorkspaceResponses[keyof CreateAdminWorkspaceResponses];
+
+export type GetAdminWorkspaceData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/workspaces/{id}';
+};
+
+export type GetAdminWorkspaceErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminWorkspaceError = GetAdminWorkspaceErrors[keyof GetAdminWorkspaceErrors];
+
+export type GetAdminWorkspaceResponses = {
+    /**
+     * Success
+     */
+    200: Workspace;
+};
+
+export type GetAdminWorkspaceResponse = GetAdminWorkspaceResponses[keyof GetAdminWorkspaceResponses];
+
+export type ListAdminMembershipsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, workspaceId, userId, role. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        userId?: string;
+        role?: string;
+    };
+    url: '/v1/admin/memberships';
+};
+
+export type ListAdminMembershipsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminMembershipsError = ListAdminMembershipsErrors[keyof ListAdminMembershipsErrors];
+
+export type ListAdminMembershipsResponses = {
+    /**
+     * Success
+     */
+    200: MembershipsPage;
+};
+
+export type ListAdminMembershipsResponse = ListAdminMembershipsResponses[keyof ListAdminMembershipsResponses];
+
+export type ListAdminAgentsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, createdAt, status. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        userId?: string;
+        status?: string;
+        pendingApproval?: boolean;
+        q?: string;
+    };
+    url: '/v1/admin/agents';
+};
+
+export type ListAdminAgentsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminAgentsError = ListAdminAgentsErrors[keyof ListAdminAgentsErrors];
+
+export type ListAdminAgentsResponses = {
+    /**
+     * Success
+     */
+    200: AgentsPage;
+};
+
+export type ListAdminAgentsResponse = ListAdminAgentsResponses[keyof ListAdminAgentsResponses];
+
+export type GetAdminAgentData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/agents/{id}';
+};
+
+export type GetAdminAgentErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminAgentError = GetAdminAgentErrors[keyof GetAdminAgentErrors];
+
+export type GetAdminAgentResponses = {
+    /**
+     * Success
+     */
+    200: Agent;
+};
+
+export type GetAdminAgentResponse = GetAdminAgentResponses[keyof GetAdminAgentResponses];
+
+export type UpdateAdminAgentData = {
+    body: UpdateAgent;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/agents/{id}';
+};
+
+export type UpdateAdminAgentErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateAdminAgentError = UpdateAdminAgentErrors[keyof UpdateAdminAgentErrors];
+
+export type UpdateAdminAgentResponses = {
+    /**
+     * Success
+     */
+    200: Agent;
+};
+
+export type UpdateAdminAgentResponse = UpdateAdminAgentResponses[keyof UpdateAdminAgentResponses];
+
+export type PutAdminAgentApprovalData = {
+    body: PutAgentApproval;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/agents/{id}/approval';
+};
+
+export type PutAdminAgentApprovalErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type PutAdminAgentApprovalError = PutAdminAgentApprovalErrors[keyof PutAdminAgentApprovalErrors];
+
+export type PutAdminAgentApprovalResponses = {
+    /**
+     * Success
+     */
+    200: Agent;
+};
+
+export type PutAdminAgentApprovalResponse = PutAdminAgentApprovalResponses[keyof PutAdminAgentApprovalResponses];
+
+export type ListAdminEnrollmentKeysData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, expiresAt. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        userId?: string;
+        revoked?: boolean;
+    };
+    url: '/v1/admin/enrollment-keys';
+};
+
+export type ListAdminEnrollmentKeysErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminEnrollmentKeysError = ListAdminEnrollmentKeysErrors[keyof ListAdminEnrollmentKeysErrors];
+
+export type ListAdminEnrollmentKeysResponses = {
+    /**
+     * Success
+     */
+    200: EnrollmentKeysPage;
+};
+
+export type ListAdminEnrollmentKeysResponse = ListAdminEnrollmentKeysResponses[keyof ListAdminEnrollmentKeysResponses];
+
+export type CreateAdminEnrollmentKeyData = {
+    body: CreateEnrollmentKey;
+    path?: never;
+    query?: never;
+    url: '/v1/admin/enrollment-keys';
+};
+
+export type CreateAdminEnrollmentKeyErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateAdminEnrollmentKeyError = CreateAdminEnrollmentKeyErrors[keyof CreateAdminEnrollmentKeyErrors];
+
+export type CreateAdminEnrollmentKeyResponses = {
+    /**
+     * Success
+     */
+    201: CreatedEnrollmentKey;
+};
+
+export type CreateAdminEnrollmentKeyResponse = CreateAdminEnrollmentKeyResponses[keyof CreateAdminEnrollmentKeyResponses];
+
+export type GetAdminEnrollmentKeyData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/enrollment-keys/{id}';
+};
+
+export type GetAdminEnrollmentKeyErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminEnrollmentKeyError = GetAdminEnrollmentKeyErrors[keyof GetAdminEnrollmentKeyErrors];
+
+export type GetAdminEnrollmentKeyResponses = {
+    /**
+     * Success
+     */
+    200: EnrollmentKey;
+};
+
+export type GetAdminEnrollmentKeyResponse = GetAdminEnrollmentKeyResponses[keyof GetAdminEnrollmentKeyResponses];
+
+export type UpdateAdminEnrollmentKeyData = {
+    body: UpdateEnrollmentKey;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/enrollment-keys/{id}';
+};
+
+export type UpdateAdminEnrollmentKeyErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateAdminEnrollmentKeyError = UpdateAdminEnrollmentKeyErrors[keyof UpdateAdminEnrollmentKeyErrors];
+
+export type UpdateAdminEnrollmentKeyResponses = {
+    /**
+     * Success
+     */
+    200: EnrollmentKey;
+};
+
+export type UpdateAdminEnrollmentKeyResponse = UpdateAdminEnrollmentKeyResponses[keyof UpdateAdminEnrollmentKeyResponses];
+
+export type ListAdminGrantsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, startsAt, expiresAt. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        resourceType?: string;
+        resourceId?: string;
+        subjectType?: string;
+        subjectId?: string;
+        revoked?: boolean;
+    };
+    url: '/v1/admin/grants';
+};
+
+export type ListAdminGrantsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminGrantsError = ListAdminGrantsErrors[keyof ListAdminGrantsErrors];
+
+export type ListAdminGrantsResponses = {
+    /**
+     * Success
+     */
+    200: GrantsPage;
+};
+
+export type ListAdminGrantsResponse = ListAdminGrantsResponses[keyof ListAdminGrantsResponses];
+
+export type CreateAdminGrantData = {
+    body: CreateGrant;
+    path?: never;
+    query?: never;
+    url: '/v1/admin/grants';
+};
+
+export type CreateAdminGrantErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateAdminGrantError = CreateAdminGrantErrors[keyof CreateAdminGrantErrors];
+
+export type CreateAdminGrantResponses = {
+    /**
+     * Success
+     */
+    201: Grant;
+};
+
+export type CreateAdminGrantResponse = CreateAdminGrantResponses[keyof CreateAdminGrantResponses];
+
+export type GetAdminGrantData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/grants/{id}';
+};
+
+export type GetAdminGrantErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminGrantError = GetAdminGrantErrors[keyof GetAdminGrantErrors];
+
+export type GetAdminGrantResponses = {
+    /**
+     * Success
+     */
+    200: Grant;
+};
+
+export type GetAdminGrantResponse = GetAdminGrantResponses[keyof GetAdminGrantResponses];
+
+export type UpdateAdminGrantData = {
+    body: UpdateGrant;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/grants/{id}';
+};
+
+export type UpdateAdminGrantErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateAdminGrantError = UpdateAdminGrantErrors[keyof UpdateAdminGrantErrors];
+
+export type UpdateAdminGrantResponses = {
+    /**
+     * Success
+     */
+    200: Grant;
+};
+
+export type UpdateAdminGrantResponse = UpdateAdminGrantResponses[keyof UpdateAdminGrantResponses];
+
+export type ListAdminConnectionsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, connectedAt, role. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        agentId?: string;
+        role?: string;
+    };
+    url: '/v1/admin/connections';
+};
+
+export type ListAdminConnectionsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminConnectionsError = ListAdminConnectionsErrors[keyof ListAdminConnectionsErrors];
+
+export type ListAdminConnectionsResponses = {
+    /**
+     * Success
+     */
+    200: ConnectionsPage;
+};
+
+export type ListAdminConnectionsResponse = ListAdminConnectionsResponses[keyof ListAdminConnectionsResponses];
+
+export type GetAdminConnectionData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/connections/{id}';
+};
+
+export type GetAdminConnectionErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminConnectionError = GetAdminConnectionErrors[keyof GetAdminConnectionErrors];
+
+export type GetAdminConnectionResponses = {
+    /**
+     * Success
+     */
+    200: ConnectionStatus;
+};
+
+export type GetAdminConnectionResponse = GetAdminConnectionResponses[keyof GetAdminConnectionResponses];
+
+export type ListAdminFlowsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, startedAt, state, purpose. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        agentId?: string;
+        userId?: string;
+        resourceId?: string;
+        purpose?: string;
+    };
+    url: '/v1/admin/flows';
+};
+
+export type ListAdminFlowsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminFlowsError = ListAdminFlowsErrors[keyof ListAdminFlowsErrors];
+
+export type ListAdminFlowsResponses = {
+    /**
+     * Success
+     */
+    200: FlowsPage;
+};
+
+export type ListAdminFlowsResponse = ListAdminFlowsResponses[keyof ListAdminFlowsResponses];
+
+export type GetAdminFlowData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/flows/{id}';
+};
+
+export type GetAdminFlowErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminFlowError = GetAdminFlowErrors[keyof GetAdminFlowErrors];
+
+export type GetAdminFlowResponses = {
+    /**
+     * Success
+     */
+    200: FlowStatus;
+};
+
+export type GetAdminFlowResponse = GetAdminFlowResponses[keyof GetAdminFlowResponses];
+
+export type ListAdminAuditEventsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, at, action. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        actorId?: string;
+        resourceId?: string;
+        action?: string;
+    };
+    url: '/v1/admin/audit-events';
+};
+
+export type ListAdminAuditEventsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminAuditEventsError = ListAdminAuditEventsErrors[keyof ListAdminAuditEventsErrors];
+
+export type ListAdminAuditEventsResponses = {
+    /**
+     * Success
+     */
+    200: AuditEventsPage;
+};
+
+export type ListAdminAuditEventsResponse = ListAdminAuditEventsResponses[keyof ListAdminAuditEventsResponses];
+
+export type GetAdminAuditEventData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/audit-events/{id}';
+};
+
+export type GetAdminAuditEventErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminAuditEventError = GetAdminAuditEventErrors[keyof GetAdminAuditEventErrors];
+
+export type GetAdminAuditEventResponses = {
+    /**
+     * Success
+     */
+    200: Audit;
+};
+
+export type GetAdminAuditEventResponse = GetAdminAuditEventResponses[keyof GetAdminAuditEventResponses];
+
+export type DeleteMembershipData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/memberships/{userId}';
+};
+
+export type DeleteMembershipErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type DeleteMembershipError = DeleteMembershipErrors[keyof DeleteMembershipErrors];
+
+export type DeleteMembershipResponses = {
+    /**
+     * Success
+     */
+    204: void;
+};
+
+export type DeleteMembershipResponse = DeleteMembershipResponses[keyof DeleteMembershipResponses];
+
+export type GetMembershipData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/memberships/{userId}';
+};
+
+export type GetMembershipErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetMembershipError = GetMembershipErrors[keyof GetMembershipErrors];
+
+export type GetMembershipResponses = {
+    /**
+     * Success
+     */
+    200: Membership;
+};
+
+export type GetMembershipResponse = GetMembershipResponses[keyof GetMembershipResponses];
+
+export type PutMembershipData = {
+    body: PutMembership;
+    path: {
+        workspaceId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/memberships/{userId}';
+};
+
+export type PutMembershipErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type PutMembershipError = PutMembershipErrors[keyof PutMembershipErrors];
+
+export type PutMembershipResponses = {
+    /**
+     * Success
+     */
+    200: Membership;
+};
+
+export type PutMembershipResponse = PutMembershipResponses[keyof PutMembershipResponses];
+
+export type DeleteAdminMembershipData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/v1/admin/workspaces/{workspaceId}/memberships/{userId}';
+};
+
+export type DeleteAdminMembershipErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type DeleteAdminMembershipError = DeleteAdminMembershipErrors[keyof DeleteAdminMembershipErrors];
+
+export type DeleteAdminMembershipResponses = {
+    /**
+     * Success
+     */
+    204: void;
+};
+
+export type DeleteAdminMembershipResponse = DeleteAdminMembershipResponses[keyof DeleteAdminMembershipResponses];
+
+export type GetAdminMembershipData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/v1/admin/workspaces/{workspaceId}/memberships/{userId}';
+};
+
+export type GetAdminMembershipErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminMembershipError = GetAdminMembershipErrors[keyof GetAdminMembershipErrors];
+
+export type GetAdminMembershipResponses = {
+    /**
+     * Success
+     */
+    200: Membership;
+};
+
+export type GetAdminMembershipResponse = GetAdminMembershipResponses[keyof GetAdminMembershipResponses];
+
+export type PutAdminMembershipData = {
+    body: PutMembership;
+    path: {
+        workspaceId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/v1/admin/workspaces/{workspaceId}/memberships/{userId}';
+};
+
+export type PutAdminMembershipErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type PutAdminMembershipError = PutAdminMembershipErrors[keyof PutAdminMembershipErrors];
+
+export type PutAdminMembershipResponses = {
+    /**
+     * Success
+     */
+    200: Membership;
+};
+
+export type PutAdminMembershipResponse = PutAdminMembershipResponses[keyof PutAdminMembershipResponses];
+
+export type ListWorkspaceAgentsData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, createdAt, status. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        userId?: string;
+        status?: string;
+        pendingApproval?: boolean;
+        q?: string;
+    };
+    url: '/v1/workspaces/{workspaceId}/agents';
+};
+
+export type ListWorkspaceAgentsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceAgentsError = ListWorkspaceAgentsErrors[keyof ListWorkspaceAgentsErrors];
+
+export type ListWorkspaceAgentsResponses = {
+    /**
+     * Success
+     */
+    200: AgentsPage;
+};
+
+export type ListWorkspaceAgentsResponse = ListWorkspaceAgentsResponses[keyof ListWorkspaceAgentsResponses];
+
+export type GetWorkspaceAgentData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        agentId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/agents/{agentId}';
+};
+
+export type GetWorkspaceAgentErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceAgentError = GetWorkspaceAgentErrors[keyof GetWorkspaceAgentErrors];
+
+export type GetWorkspaceAgentResponses = {
+    /**
+     * Success
+     */
+    200: Agent;
+};
+
+export type GetWorkspaceAgentResponse = GetWorkspaceAgentResponses[keyof GetWorkspaceAgentResponses];
+
+export type UpdateWorkspaceAgentData = {
+    body: UpdateAgent;
+    path: {
+        workspaceId: string;
+        agentId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/agents/{agentId}';
+};
+
+export type UpdateWorkspaceAgentErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateWorkspaceAgentError = UpdateWorkspaceAgentErrors[keyof UpdateWorkspaceAgentErrors];
+
+export type UpdateWorkspaceAgentResponses = {
+    /**
+     * Success
+     */
+    200: Agent;
+};
+
+export type UpdateWorkspaceAgentResponse = UpdateWorkspaceAgentResponses[keyof UpdateWorkspaceAgentResponses];
+
+export type ListWorkspaceMembershipsData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, workspaceId, userId, role. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        userId?: string;
+        role?: string;
+    };
+    url: '/v1/workspaces/{workspaceId}/memberships';
+};
+
+export type ListWorkspaceMembershipsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceMembershipsError = ListWorkspaceMembershipsErrors[keyof ListWorkspaceMembershipsErrors];
+
+export type ListWorkspaceMembershipsResponses = {
+    /**
+     * Success
+     */
+    200: MembershipsPage;
+};
+
+export type ListWorkspaceMembershipsResponse = ListWorkspaceMembershipsResponses[keyof ListWorkspaceMembershipsResponses];
+
+export type ListWorkspaceEnrollmentKeysData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, expiresAt. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        userId?: string;
+        revoked?: boolean;
+    };
+    url: '/v1/workspaces/{workspaceId}/enrollment-keys';
+};
+
+export type ListWorkspaceEnrollmentKeysErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceEnrollmentKeysError = ListWorkspaceEnrollmentKeysErrors[keyof ListWorkspaceEnrollmentKeysErrors];
+
+export type ListWorkspaceEnrollmentKeysResponses = {
+    /**
+     * Success
+     */
+    200: EnrollmentKeysPage;
+};
+
+export type ListWorkspaceEnrollmentKeysResponse = ListWorkspaceEnrollmentKeysResponses[keyof ListWorkspaceEnrollmentKeysResponses];
+
+export type CreateWorkspaceEnrollmentKeyData = {
+    body: CreateWorkspaceEnrollmentKey;
+    path: {
+        workspaceId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/enrollment-keys';
+};
+
+export type CreateWorkspaceEnrollmentKeyErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateWorkspaceEnrollmentKeyError = CreateWorkspaceEnrollmentKeyErrors[keyof CreateWorkspaceEnrollmentKeyErrors];
+
+export type CreateWorkspaceEnrollmentKeyResponses = {
+    /**
+     * Success
+     */
+    201: CreatedEnrollmentKey;
+};
+
+export type CreateWorkspaceEnrollmentKeyResponse = CreateWorkspaceEnrollmentKeyResponses[keyof CreateWorkspaceEnrollmentKeyResponses];
+
+export type GetWorkspaceEnrollmentKeyData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        keyId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/enrollment-keys/{keyId}';
+};
+
+export type GetWorkspaceEnrollmentKeyErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceEnrollmentKeyError = GetWorkspaceEnrollmentKeyErrors[keyof GetWorkspaceEnrollmentKeyErrors];
+
+export type GetWorkspaceEnrollmentKeyResponses = {
+    /**
+     * Success
+     */
+    200: EnrollmentKey;
+};
+
+export type GetWorkspaceEnrollmentKeyResponse = GetWorkspaceEnrollmentKeyResponses[keyof GetWorkspaceEnrollmentKeyResponses];
+
+export type UpdateWorkspaceEnrollmentKeyData = {
+    body: UpdateEnrollmentKey;
+    path: {
+        workspaceId: string;
+        keyId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/enrollment-keys/{keyId}';
+};
+
+export type UpdateWorkspaceEnrollmentKeyErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateWorkspaceEnrollmentKeyError = UpdateWorkspaceEnrollmentKeyErrors[keyof UpdateWorkspaceEnrollmentKeyErrors];
+
+export type UpdateWorkspaceEnrollmentKeyResponses = {
+    /**
+     * Success
+     */
+    200: EnrollmentKey;
+};
+
+export type UpdateWorkspaceEnrollmentKeyResponse = UpdateWorkspaceEnrollmentKeyResponses[keyof UpdateWorkspaceEnrollmentKeyResponses];
+
+export type ListWorkspaceGrantsData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, startsAt, expiresAt. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        resourceType?: string;
+        resourceId?: string;
+        subjectType?: string;
+        subjectId?: string;
+        revoked?: boolean;
+    };
+    url: '/v1/workspaces/{workspaceId}/grants';
+};
+
+export type ListWorkspaceGrantsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceGrantsError = ListWorkspaceGrantsErrors[keyof ListWorkspaceGrantsErrors];
+
+export type ListWorkspaceGrantsResponses = {
+    /**
+     * Success
+     */
+    200: GrantsPage;
+};
+
+export type ListWorkspaceGrantsResponse = ListWorkspaceGrantsResponses[keyof ListWorkspaceGrantsResponses];
+
+export type CreateWorkspaceGrantData = {
+    body: CreateWorkspaceGrant;
+    path: {
+        workspaceId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/grants';
+};
+
+export type CreateWorkspaceGrantErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateWorkspaceGrantError = CreateWorkspaceGrantErrors[keyof CreateWorkspaceGrantErrors];
+
+export type CreateWorkspaceGrantResponses = {
+    /**
+     * Success
+     */
+    201: Grant;
+};
+
+export type CreateWorkspaceGrantResponse = CreateWorkspaceGrantResponses[keyof CreateWorkspaceGrantResponses];
+
+export type GetWorkspaceGrantData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        grantId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/grants/{grantId}';
+};
+
+export type GetWorkspaceGrantErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceGrantError = GetWorkspaceGrantErrors[keyof GetWorkspaceGrantErrors];
+
+export type GetWorkspaceGrantResponses = {
+    /**
+     * Success
+     */
+    200: Grant;
+};
+
+export type GetWorkspaceGrantResponse = GetWorkspaceGrantResponses[keyof GetWorkspaceGrantResponses];
+
+export type UpdateWorkspaceGrantData = {
+    body: UpdateGrant;
+    path: {
+        workspaceId: string;
+        grantId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/grants/{grantId}';
+};
+
+export type UpdateWorkspaceGrantErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateWorkspaceGrantError = UpdateWorkspaceGrantErrors[keyof UpdateWorkspaceGrantErrors];
+
+export type UpdateWorkspaceGrantResponses = {
+    /**
+     * Success
+     */
+    200: Grant;
+};
+
+export type UpdateWorkspaceGrantResponse = UpdateWorkspaceGrantResponses[keyof UpdateWorkspaceGrantResponses];
+
+export type ListWorkspaceConnectionsData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, connectedAt, role. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        agentId?: string;
+        role?: string;
+    };
+    url: '/v1/workspaces/{workspaceId}/connections';
+};
+
+export type ListWorkspaceConnectionsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceConnectionsError = ListWorkspaceConnectionsErrors[keyof ListWorkspaceConnectionsErrors];
+
+export type ListWorkspaceConnectionsResponses = {
+    /**
+     * Success
+     */
+    200: ConnectionsPage;
+};
+
+export type ListWorkspaceConnectionsResponse = ListWorkspaceConnectionsResponses[keyof ListWorkspaceConnectionsResponses];
+
+export type GetWorkspaceConnectionData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/connections/{connectionId}';
+};
+
+export type GetWorkspaceConnectionErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceConnectionError = GetWorkspaceConnectionErrors[keyof GetWorkspaceConnectionErrors];
+
+export type GetWorkspaceConnectionResponses = {
+    /**
+     * Success
+     */
+    200: ConnectionStatus;
+};
+
+export type GetWorkspaceConnectionResponse = GetWorkspaceConnectionResponses[keyof GetWorkspaceConnectionResponses];
+
+export type ListWorkspaceFlowsData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, startedAt, state, purpose. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        agentId?: string;
+        userId?: string;
+        resourceId?: string;
+        purpose?: string;
+    };
+    url: '/v1/workspaces/{workspaceId}/flows';
+};
+
+export type ListWorkspaceFlowsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceFlowsError = ListWorkspaceFlowsErrors[keyof ListWorkspaceFlowsErrors];
+
+export type ListWorkspaceFlowsResponses = {
+    /**
+     * Success
+     */
+    200: FlowsPage;
+};
+
+export type ListWorkspaceFlowsResponse = ListWorkspaceFlowsResponses[keyof ListWorkspaceFlowsResponses];
+
+export type GetWorkspaceFlowData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        flowId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/flows/{flowId}';
+};
+
+export type GetWorkspaceFlowErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceFlowError = GetWorkspaceFlowErrors[keyof GetWorkspaceFlowErrors];
+
+export type GetWorkspaceFlowResponses = {
+    /**
+     * Success
+     */
+    200: FlowStatus;
+};
+
+export type GetWorkspaceFlowResponse = GetWorkspaceFlowResponses[keyof GetWorkspaceFlowResponses];
+
+export type PutWorkspaceAgentApprovalData = {
+    body: PutAgentApproval;
+    path: {
+        workspaceId: string;
+        agentId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/agents/{agentId}/approval';
+};
+
+export type PutWorkspaceAgentApprovalErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type PutWorkspaceAgentApprovalError = PutWorkspaceAgentApprovalErrors[keyof PutWorkspaceAgentApprovalErrors];
+
+export type PutWorkspaceAgentApprovalResponses = {
+    /**
+     * Success
+     */
+    200: Agent;
+};
+
+export type PutWorkspaceAgentApprovalResponse = PutWorkspaceAgentApprovalResponses[keyof PutWorkspaceAgentApprovalResponses];
+
+export type ListWorkspaceIngressesData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, status. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        agentId?: string;
+        status?: string;
+        enabled?: boolean;
+        q?: string;
+    };
+    url: '/v1/workspaces/{workspaceId}/ingresses';
+};
+
+export type ListWorkspaceIngressesErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceIngressesError = ListWorkspaceIngressesErrors[keyof ListWorkspaceIngressesErrors];
+
+export type ListWorkspaceIngressesResponses = {
+    /**
+     * Success
+     */
+    200: WorkspaceIngressesPage;
+};
+
+export type ListWorkspaceIngressesResponse = ListWorkspaceIngressesResponses[keyof ListWorkspaceIngressesResponses];
+
+export type ListWorkspaceServersData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, hostname. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        agentId?: string;
+        enabled?: boolean;
+        q?: string;
+    };
+    url: '/v1/workspaces/{workspaceId}/servers';
+};
+
+export type ListWorkspaceServersErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceServersError = ListWorkspaceServersErrors[keyof ListWorkspaceServersErrors];
+
+export type ListWorkspaceServersResponses = {
+    /**
+     * Success
+     */
+    200: WorkspaceServersPage;
+};
+
+export type ListWorkspaceServersResponse = ListWorkspaceServersResponses[keyof ListWorkspaceServersResponses];
+
+export type ListWorkspaceEgressesData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, status. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        agentId?: string;
+        status?: string;
+        enabled?: boolean;
+        q?: string;
+    };
+    url: '/v1/workspaces/{workspaceId}/egresses';
+};
+
+export type ListWorkspaceEgressesErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceEgressesError = ListWorkspaceEgressesErrors[keyof ListWorkspaceEgressesErrors];
+
+export type ListWorkspaceEgressesResponses = {
+    /**
+     * Success
+     */
+    200: WorkspaceEgressesPage;
+};
+
+export type ListWorkspaceEgressesResponse = ListWorkspaceEgressesResponses[keyof ListWorkspaceEgressesResponses];
+
+export type ListWorkspaceRoutesData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, kind, priority. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        agentId?: string;
+        kind?: string;
+        enabled?: boolean;
+        q?: string;
+    };
+    url: '/v1/workspaces/{workspaceId}/routes';
+};
+
+export type ListWorkspaceRoutesErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceRoutesError = ListWorkspaceRoutesErrors[keyof ListWorkspaceRoutesErrors];
+
+export type ListWorkspaceRoutesResponses = {
+    /**
+     * Success
+     */
+    200: WorkspaceRoutesPage;
+};
+
+export type ListWorkspaceRoutesResponse = ListWorkspaceRoutesResponses[keyof ListWorkspaceRoutesResponses];
+
+export type CreateWorkspaceRouteData = {
+    body: CreateWorkspaceRoute;
+    path: {
+        workspaceId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/routes';
+};
+
+export type CreateWorkspaceRouteErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateWorkspaceRouteError = CreateWorkspaceRouteErrors[keyof CreateWorkspaceRouteErrors];
+
+export type CreateWorkspaceRouteResponses = {
+    /**
+     * Success
+     */
+    201: RouteView;
+};
+
+export type CreateWorkspaceRouteResponse = CreateWorkspaceRouteResponses[keyof CreateWorkspaceRouteResponses];
+
+export type GetWorkspaceServerData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        serviceId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/servers/{serviceId}';
+};
+
+export type GetWorkspaceServerErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceServerError = GetWorkspaceServerErrors[keyof GetWorkspaceServerErrors];
+
+export type GetWorkspaceServerResponses = {
+    /**
+     * Success
+     */
+    200: ServerView;
+};
+
+export type GetWorkspaceServerResponse = GetWorkspaceServerResponses[keyof GetWorkspaceServerResponses];
+
+export type UpdateWorkspaceServerData = {
+    body: UpdateServer;
+    path: {
+        workspaceId: string;
+        serviceId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/servers/{serviceId}';
+};
+
+export type UpdateWorkspaceServerErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateWorkspaceServerError = UpdateWorkspaceServerErrors[keyof UpdateWorkspaceServerErrors];
+
+export type UpdateWorkspaceServerResponses = {
+    /**
+     * Success
+     */
+    200: ServerView;
+};
+
+export type UpdateWorkspaceServerResponse = UpdateWorkspaceServerResponses[keyof UpdateWorkspaceServerResponses];
+
+export type GetWorkspaceRouteData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        routeId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/routes/{routeId}';
+};
+
+export type GetWorkspaceRouteErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceRouteError = GetWorkspaceRouteErrors[keyof GetWorkspaceRouteErrors];
+
+export type GetWorkspaceRouteResponses = {
+    /**
+     * Success
+     */
+    200: RouteView;
+};
+
+export type GetWorkspaceRouteResponse = GetWorkspaceRouteResponses[keyof GetWorkspaceRouteResponses];
+
+export type UpdateWorkspaceRouteData = {
+    body: UpdateRoute;
+    path: {
+        workspaceId: string;
+        routeId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/routes/{routeId}';
+};
+
+export type UpdateWorkspaceRouteErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateWorkspaceRouteError = UpdateWorkspaceRouteErrors[keyof UpdateWorkspaceRouteErrors];
+
+export type UpdateWorkspaceRouteResponses = {
+    /**
+     * Success
+     */
+    200: RouteView;
+};
+
+export type UpdateWorkspaceRouteResponse = UpdateWorkspaceRouteResponses[keyof UpdateWorkspaceRouteResponses];
+
+export type GetWorkspaceData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}';
+};
+
+export type GetWorkspaceErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceError = GetWorkspaceErrors[keyof GetWorkspaceErrors];
+
+export type GetWorkspaceResponses = {
+    /**
+     * Success
+     */
+    200: Workspace;
+};
+
+export type GetWorkspaceResponse = GetWorkspaceResponses[keyof GetWorkspaceResponses];
+
+export type ListAdminServersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, hostname. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        agentId?: string;
+        enabled?: boolean;
+        q?: string;
+    };
+    url: '/v1/admin/servers';
+};
+
+export type ListAdminServersErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminServersError = ListAdminServersErrors[keyof ListAdminServersErrors];
+
+export type ListAdminServersResponses = {
+    /**
+     * Success
+     */
+    200: ServersPage;
+};
+
+export type ListAdminServersResponse = ListAdminServersResponses[keyof ListAdminServersResponses];
+
+export type GetAdminServerData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/servers/{id}';
+};
+
+export type GetAdminServerErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminServerError = GetAdminServerErrors[keyof GetAdminServerErrors];
+
+export type GetAdminServerResponses = {
+    /**
+     * Success
+     */
+    200: ServerView;
+};
+
+export type GetAdminServerResponse = GetAdminServerResponses[keyof GetAdminServerResponses];
+
+export type UpdateAdminServerData = {
+    body: UpdateServer;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/servers/{id}';
+};
+
+export type UpdateAdminServerErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateAdminServerError = UpdateAdminServerErrors[keyof UpdateAdminServerErrors];
+
+export type UpdateAdminServerResponses = {
+    /**
+     * Success
+     */
+    200: ServerView;
+};
+
+export type UpdateAdminServerResponse = UpdateAdminServerResponses[keyof UpdateAdminServerResponses];
+
+export type ListAdminRoutesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, kind, priority. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        agentId?: string;
+        kind?: string;
+        enabled?: boolean;
+        q?: string;
+    };
+    url: '/v1/admin/routes';
+};
+
+export type ListAdminRoutesErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminRoutesError = ListAdminRoutesErrors[keyof ListAdminRoutesErrors];
+
+export type ListAdminRoutesResponses = {
+    /**
+     * Success
+     */
+    200: RoutesPage;
+};
+
+export type ListAdminRoutesResponse = ListAdminRoutesResponses[keyof ListAdminRoutesResponses];
+
+export type CreateAdminRouteData = {
+    body: CreateAdminRoute;
+    path?: never;
+    query?: never;
+    url: '/v1/admin/routes';
+};
+
+export type CreateAdminRouteErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type CreateAdminRouteError = CreateAdminRouteErrors[keyof CreateAdminRouteErrors];
+
+export type CreateAdminRouteResponses = {
+    /**
+     * Success
+     */
+    201: RouteView;
+};
+
+export type CreateAdminRouteResponse = CreateAdminRouteResponses[keyof CreateAdminRouteResponses];
+
+export type GetAdminRouteData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/routes/{id}';
+};
+
+export type GetAdminRouteErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminRouteError = GetAdminRouteErrors[keyof GetAdminRouteErrors];
+
+export type GetAdminRouteResponses = {
+    /**
+     * Success
+     */
+    200: RouteView;
+};
+
+export type GetAdminRouteResponse = GetAdminRouteResponses[keyof GetAdminRouteResponses];
+
+export type UpdateAdminRouteData = {
+    body: UpdateRoute;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/routes/{id}';
+};
+
+export type UpdateAdminRouteErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type UpdateAdminRouteError = UpdateAdminRouteErrors[keyof UpdateAdminRouteErrors];
+
+export type UpdateAdminRouteResponses = {
+    /**
+     * Success
+     */
+    200: RouteView;
+};
+
+export type UpdateAdminRouteResponse = UpdateAdminRouteResponses[keyof UpdateAdminRouteResponses];
+
+export type ListWorkspaceUsersData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, createdAt. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        q?: string;
+        disabled?: boolean;
+        admin?: boolean;
+    };
+    url: '/v1/workspaces/{workspaceId}/users';
+};
+
+export type ListWorkspaceUsersErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListWorkspaceUsersError = ListWorkspaceUsersErrors[keyof ListWorkspaceUsersErrors];
+
+export type ListWorkspaceUsersResponses = {
+    /**
+     * Success
+     */
+    200: UsersPage;
+};
+
+export type ListWorkspaceUsersResponse = ListWorkspaceUsersResponses[keyof ListWorkspaceUsersResponses];
+
+export type GetWorkspaceUserData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/users/{userId}';
+};
+
+export type GetWorkspaceUserErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceUserError = GetWorkspaceUserErrors[keyof GetWorkspaceUserErrors];
+
+export type GetWorkspaceUserResponses = {
+    /**
+     * Success
+     */
+    200: User;
+};
+
+export type GetWorkspaceUserResponse = GetWorkspaceUserResponses[keyof GetWorkspaceUserResponses];
+
+export type GetWorkspaceIngressData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        agentId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/ingresses/{agentId}';
+};
+
+export type GetWorkspaceIngressErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceIngressError = GetWorkspaceIngressErrors[keyof GetWorkspaceIngressErrors];
+
+export type GetWorkspaceIngressResponses = {
+    /**
+     * Success
+     */
+    200: IngressView;
+};
+
+export type GetWorkspaceIngressResponse = GetWorkspaceIngressResponses[keyof GetWorkspaceIngressResponses];
+
+export type GetWorkspaceEgressData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+        agentId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/egresses/{agentId}';
+};
+
+export type GetWorkspaceEgressErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspaceEgressError = GetWorkspaceEgressErrors[keyof GetWorkspaceEgressErrors];
+
+export type GetWorkspaceEgressResponses = {
+    /**
+     * Success
+     */
+    200: EgressView;
+};
+
+export type GetWorkspaceEgressResponse = GetWorkspaceEgressResponses[keyof GetWorkspaceEgressResponses];
+
+export type ListAdminIngressesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, status. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        agentId?: string;
+        status?: string;
+        enabled?: boolean;
+        q?: string;
+    };
+    url: '/v1/admin/ingresses';
+};
+
+export type ListAdminIngressesErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminIngressesError = ListAdminIngressesErrors[keyof ListAdminIngressesErrors];
+
+export type ListAdminIngressesResponses = {
+    /**
+     * Success
+     */
+    200: WorkspaceIngressesPage;
+};
+
+export type ListAdminIngressesResponse = ListAdminIngressesResponses[keyof ListAdminIngressesResponses];
+
+export type GetAdminIngressData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/ingresses/{id}';
+};
+
+export type GetAdminIngressErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminIngressError = GetAdminIngressErrors[keyof GetAdminIngressErrors];
+
+export type GetAdminIngressResponses = {
+    /**
+     * Success
+     */
+    200: IngressView;
+};
+
+export type GetAdminIngressResponse = GetAdminIngressResponses[keyof GetAdminIngressResponses];
+
+export type ListAdminEgressesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        pageSize?: number;
+        /**
+         * Allowed sort fields: id, name, status. A stable ID tie-breaker is applied.
+         */
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
+        workspaceId?: string;
+        agentId?: string;
+        status?: string;
+        enabled?: boolean;
+        q?: string;
+    };
+    url: '/v1/admin/egresses';
+};
+
+export type ListAdminEgressesErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type ListAdminEgressesError = ListAdminEgressesErrors[keyof ListAdminEgressesErrors];
+
+export type ListAdminEgressesResponses = {
+    /**
+     * Success
+     */
+    200: WorkspaceEgressesPage;
+};
+
+export type ListAdminEgressesResponse = ListAdminEgressesResponses[keyof ListAdminEgressesResponses];
+
+export type GetAdminEgressData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/v1/admin/egresses/{id}';
+};
+
+export type GetAdminEgressErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetAdminEgressError = GetAdminEgressErrors[keyof GetAdminEgressErrors];
+
+export type GetAdminEgressResponses = {
+    /**
+     * Success
+     */
+    200: EgressView;
+};
+
+export type GetAdminEgressResponse = GetAdminEgressResponses[keyof GetAdminEgressResponses];

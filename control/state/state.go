@@ -869,6 +869,16 @@ func (s *State) approve(snap *types.Snapshot, a *types.Agent) error {
 	return nil
 }
 func (s *State) ApproveAgent(actorID, agentID string) (types.Agent, error) {
+	return s.approveAgent(actorID, agentID, nil)
+}
+
+// ApproveAgentExpected binds an approval to the configuration the reviewer saw.
+// Comparison and approval share the same mutation lock and SQL transaction.
+func (s *State) ApproveAgentExpected(actorID, agentID string, expected config.Config) (types.Agent, error) {
+	return s.approveAgent(actorID, agentID, &expected)
+}
+func (s *State) approveAgent(actorID, agentID string, expected *config.Config) (types.Agent, error) {
+	var out types.Agent
 	err := s.mutate(func(snap *types.Snapshot) error {
 		a := agent(snap, agentID)
 		if a == nil {
@@ -883,19 +893,24 @@ func (s *State) ApproveAgent(actorID, agentID string) (types.Agent, error) {
 		if member(snap, a.WorkspaceID, a.UserID).Role == "guest" && (a.Desired.Serve.Enabled || a.Desired.Egress.Enabled) {
 			return problem(types.KindForbidden, "guests cannot provide services or egress")
 		}
+		if expected != nil && !reflect.DeepEqual(a.Desired, *expected) {
+			return problem(types.KindConflict, "agent desired configuration changed; reload before approving")
+		}
 		if a.Status == "active" && !a.PendingApproval {
+			out = agentView(snap, *a)
 			return nil
 		}
 		if err := s.approve(snap, a); err != nil {
 			return err
 		}
 		audit(snap, actorID, "agent.approve", agentID)
+		out = agentView(snap, *a)
 		return nil
 	})
 	if err != nil {
 		return types.Agent{}, err
 	}
-	return s.Agent(agentID)
+	return out, nil
 }
 
 func intersectRules(a, b []policy.Rule) []policy.Rule {
@@ -974,6 +989,29 @@ func (s *State) Agent(id string) (types.Agent, error) {
 	}
 	return agentView(&snap, *a), nil
 }
+
+// AgentViews projects a bounded set of already-authorized device references
+// against one detached snapshot. Callers must scope IDs before invoking it.
+func (s *State) AgentViews(ids []string) (map[string]types.Agent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	snap, err := clone(s.snapshot)
+	if err != nil {
+		return nil, err
+	}
+	wanted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		wanted[id] = true
+	}
+	out := make(map[string]types.Agent, len(wanted))
+	for _, a := range snap.Agents {
+		if wanted[a.ID] {
+			out[a.ID] = agentView(&snap, a)
+		}
+	}
+	return out, nil
+}
+
 func (s *State) GetAgentCredentials(controlToken string) (credentials.Credentials, error) {
 	if err := s.renewAgentTokens(controlToken); err != nil {
 		return credentials.Credentials{}, err
@@ -1165,7 +1203,27 @@ func (s *State) SnapshotForUser(userID string) (types.Snapshot, error) {
 	})
 	snap.Services = slices.DeleteFunc(snap.Services, func(v types.Service) bool { return !visible[v.WorkspaceID] })
 	snap.EgressRoutes = slices.DeleteFunc(snap.EgressRoutes, func(v types.EgressRoute) bool { return !visible[v.WorkspaceID] })
-	snap.Grants = slices.DeleteFunc(snap.Grants, func(g types.Grant) bool { return !managed[g.WorkspaceID] })
+	// Match the existing service-management authority: developers can manage
+	// grants on their own services, while egress and other service grants remain
+	// visible only to workspace managers.
+	snap.Grants = slices.DeleteFunc(snap.Grants, func(g types.Grant) bool {
+		if managed[g.WorkspaceID] {
+			return false
+		}
+		if !visible[g.WorkspaceID] || g.ResourceType != "service" {
+			return true
+		}
+		membership := member(&snap, g.WorkspaceID, userID)
+		if membership == nil || membership.Role != "developer" {
+			return true
+		}
+		resource := service(&snap, g.ResourceID)
+		if resource == nil {
+			return true
+		}
+		provider := agent(&snap, resource.AgentID)
+		return provider == nil || provider.UserID != userID
+	})
 	snap.Audit = nil
 	return snap, nil
 }

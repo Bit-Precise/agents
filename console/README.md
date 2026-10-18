@@ -18,6 +18,8 @@ npm run check:generated
 
 唯一 API 契约是 [`../api/openapi.json`](../api/openapi.json)。[`openapi-ts.config.ts`](openapi-ts.config.ts) 使用固定版本的 `@hey-api/openapi-ts` 生成 `src/api/generated/` 下的类型、客户端和操作函数。所有 JSON 请求都调用生成的 SDK；修改 API 时更新契约并重新生成，不手写请求封装或修改生成文件。OIDC 等浏览器导航与 JSON 请求分开处理。
 
+管理调用使用 `/v1/admin/*`（实例管理员）或 `/v1/workspaces/{workspaceId}/*`（所选工作空间）；设备协议的三个 `/api/v1` 接口保留。`src/lib/view.ts` 仅是浏览器组合的本地视图，服务端没有聚合 State 接口。`load-view.ts` 为当前表格挑选生成的 SDK 操作，读取必要的有界引用；不实现自定义 HTTP 传输。主表与候选选择器均使用服务端 `page/pageSize` 分页、筛选和排序，默认 20 条，最多 100 条。筛选、工作空间和身份变更会取消并丢弃过期请求；403 保留登录态，遥测 503 显示状态未知。
+
 `src/components/ui/` 是官方 shadcn/ui CLI 生成的真实组件源码，使用 `base-nova` Base UI 预设，配置见 [`components.json`](components.json)。CLI 版本、配套 CSS、许可证和添加组件的方法见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 ## 构建产物与验证
@@ -26,7 +28,7 @@ Vite 将生产产物写入 [`../control/assets/web/`](../control/assets/web/)，
 
 浏览器验收推荐使用同源生产构建：先完成上述构建，再从仓库根目录按照[本机运行手册](../docs/local-development.md) 构建并运行 `agents serve`，访问 `http://localhost:8080/console/`。已有配置时无需重复初始化。
 
-`npm run dev` 提供 Vite 热更新，并将 `/api`、`/auth` 代理到 `http://localhost:8080`。Vite 页面的 Origin 与后端不同，写操作可能被后端 Origin/CSRF 检查拒绝，认证跳转也需要同源验证。开发代理不代表生产认证行为；使用同源服务完成登录、写操作和 OIDC 验收，不放宽后端校验。
+`npm run dev` 提供 Vite 热更新，并将 `/v1`、`/api`、`/auth` 代理到 `http://localhost:8080`。Vite 页面的 Origin 与后端不同，写操作可能被后端 Origin/CSRF 检查拒绝，认证跳转也需要同源验证。开发代理不代表生产认证行为；使用同源服务完成登录、写操作和 OIDC 验收，不放宽后端校验。
 
 ## 浏览器安全边界
 

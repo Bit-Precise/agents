@@ -64,6 +64,8 @@ jobs:
           test -z "$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
           go vet -mod=readonly ./...
           go test -mod=readonly -race -timeout=120s ./...
+      - name: Exercise Console REST navigation in Chrome
+        run: npm run test:ui --prefix console
       - name: Stop SDK authentication agent
         if: always()
         run: if [ -n "${SSH_AGENT_PID:-}" ]; then ssh-agent -k >/dev/null; fi

@@ -270,32 +270,42 @@ done <"$agents_work_dir/assets.txt"
 curl --fail --silent --show-error --max-time 10 \
   --header 'Host: agents.example.test' --header 'Origin: https://agents.example.test' \
   --header 'Content-Type: application/json' --data-binary "@$agents_work_dir/login.json" \
-  "http://127.0.0.1:$agents_control_port/api/v1/login" --output "$agents_work_dir/login-response.json"
+  "http://127.0.0.1:$agents_control_port/v1/sessions" --output "$agents_work_dir/login-response.json" \
+  --write-out '%{http_code}' >"$agents_work_dir/login-status.txt"
 for ((agents_attempt = 0; agents_attempt < 20; agents_attempt++)); do
   curl --fail --silent --show-error --max-time 10 --config "$agents_work_dir/authenticated.curl" \
-    "http://127.0.0.1:$agents_control_port/api/v1/state" --output "$agents_work_dir/state.json"
-  if python3 - "$agents_work_dir/state.json" <<'PY'
+    "http://127.0.0.1:$agents_control_port/v1/instance/status" --output "$agents_work_dir/instance-status.json"
+  if python3 - "$agents_work_dir/instance-status.json" <<'PY'
 import json
 import sys
 with open(sys.argv[1]) as stream:
-    state = json.load(stream)
-sys.exit(0 if state.get('edgeAvailable') is True else 1)
+    status = json.load(stream)
+sys.exit(0 if status.get('edgeAvailable') is True else 1)
 PY
   then
     break
   fi
   sleep 0.5
 done
+curl --fail --silent --show-error --max-time 10 --config "$agents_work_dir/authenticated.curl" \
+  "http://127.0.0.1:$agents_control_port/v1/users/me" --output "$agents_work_dir/current-user.json"
+curl --fail --silent --show-error --max-time 10 --config "$agents_work_dir/authenticated.curl" \
+  "http://127.0.0.1:$agents_control_port/v1/admin/workspaces?page=1&pageSize=1" --output "$agents_work_dir/workspaces.json"
 python3 - "$agents_work_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 directory = Path(sys.argv[1])
 login = json.loads((directory / 'login-response.json').read_text())
+assert (directory / 'login-status.txt').read_text() == '201', 'Session creation did not return 201'
 assert login['user']['admin'] is True and login['csrfToken'], 'Bootstrap login failed'
-state = json.loads((directory / 'state.json').read_text())
-assert state['user']['admin'] is True, 'Authenticated API identity mismatch'
-assert state['edgeAvailable'] is True, 'Control could not authenticate to Edge metadata API'
+user = json.loads((directory / 'current-user.json').read_text())
+assert user['admin'] is True and user['id'] == login['user']['id'], 'Authenticated API identity mismatch'
+status = json.loads((directory / 'instance-status.json').read_text())
+assert status['edgeAvailable'] is True, 'Control could not authenticate to Edge metadata API'
+workspaces = json.loads((directory / 'workspaces.json').read_text())
+assert isinstance(workspaces['items'], list) and len(workspaces['items']) <= 1, 'Invalid workspace resource page'
+assert workspaces['pagination']['page'] == 1 and workspaces['pagination']['pageSize'] == 1, 'Pagination request was ignored'
 PY
 
 agents_status="$(curl --silent --show-error --max-time 10 --output "$agents_work_dir/metadata-denied.json" \

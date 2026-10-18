@@ -290,7 +290,7 @@ func (f *oidcFixture) finish(attempt oidcAttempt, want int) *http.Response {
 }
 func (f *oidcFixture) me() (types.User, string) {
 	f.t.Helper()
-	response, err := f.client.Get(f.cfg.ServerURL + "/api/v1/me")
+	response, err := f.client.Get(f.cfg.ServerURL + "/v1/sessions/current")
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func (f *oidcFixture) me() (types.User, string) {
 func TestOIDCDiscoveryPKCEBrowserSessionSSOAndLogout(t *testing.T) {
 	idp := newTestOIDCProvider(t)
 	f := startOIDCFixture(t, idp, filepath.Join(t.TempDir(), "control.db"))
-	response, err := f.client.Get(f.cfg.ServerURL + "/api/v1/info")
+	response, err := f.client.Get(f.cfg.ServerURL + "/v1/instance")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func TestOIDCDiscoveryPKCEBrowserSessionSSOAndLogout(t *testing.T) {
 		t.Fatalf("OIDC browser session did not reach service SSO: %d %s", recorder.Code, recorder.Body.String())
 	}
 	_, csrf = f.me()
-	request, _ = http.NewRequest("POST", f.cfg.ServerURL+"/api/v1/logout", nil)
+	request, _ = http.NewRequest("DELETE", f.cfg.ServerURL+"/v1/sessions/current", nil)
 	request.Header.Set("Origin", f.cfg.ServerURL)
 	request.Header.Set("X-CSRF-Token", csrf)
 	response, err = f.client.Do(request)
@@ -400,7 +400,7 @@ func TestOIDCDiscoveryPKCEBrowserSessionSSOAndLogout(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.read(response, 204)
-	response, err = f.client.Get(f.cfg.ServerURL + "/api/v1/me")
+	response, err = f.client.Get(f.cfg.ServerURL + "/v1/sessions/current")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +618,7 @@ func TestOIDCAdminEmailRemovalRevokesExistingBearerOnStartup(t *testing.T) {
 			}
 			checkCreateUser := func(f *oidcFixture, want int) {
 				t.Helper()
-				request := httptest.NewRequest("POST", f.cfg.ServerURL+"/api/v1/users", strings.NewReader(`{"name":"created-by-email-admin"}`))
+				request := httptest.NewRequest("POST", f.cfg.ServerURL+"/v1/admin/users", strings.NewReader(`{"name":"created-by-email-admin"}`))
 				request.Header.Set("Authorization", "Bearer "+token)
 				request.Header.Set("Content-Type", "application/json")
 				recorder := httptest.NewRecorder()

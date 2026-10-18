@@ -92,23 +92,47 @@ func TestSplitControlAuthenticatesInternalAPIAndStripsConsoleCredentials(t *test
 			foreignWorkspace = workspace.ID
 		}
 	}
-	request = httptest.NewRequest("GET", cfg.ServerURL+"/api/v1/state", nil)
-	request.Header.Set("Authorization", "Bearer "+firstToken)
-	response = httptest.NewRecorder()
-	app.Handler().ServeHTTP(response, request)
-	var state struct {
-		types.Snapshot
-		EdgeAvailable bool  `json:"edgeAvailable"`
-		Connections   []any `json:"connections"`
-		Flows         []any `json:"flows"`
+	getResource := func(path string, want int, out any) {
+		t.Helper()
+		request := httptest.NewRequest("GET", cfg.ServerURL+path, nil)
+		request.Header.Set("Authorization", "Bearer "+firstToken)
+		response := httptest.NewRecorder()
+		app.Handler().ServeHTTP(response, request)
+		if response.Code != want {
+			t.Fatalf("GET %s returned %d, want %d: %s", path, response.Code, want, response.Body.String())
+		}
+		if out != nil {
+			if err := json.Unmarshal(response.Body.Bytes(), out); err != nil {
+				t.Fatalf("decode %s: %v", path, err)
+			}
+		}
 	}
-	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &state) != nil || state.EdgeAvailable || len(state.Workspaces) != 2 || state.Connections == nil || state.Flows == nil || strings.Contains(response.Body.String(), foreignWorkspace) {
-		t.Fatalf("Edge loss did not preserve scoped management snapshot: %d %s", response.Code, response.Body.String())
+	var status struct {
+		Revision      uint64 `json:"revision"`
+		EdgeAvailable bool   `json:"edgeAvailable"`
 	}
-	for _, workspace := range state.Workspaces {
+	getResource("/v1/instance/status", 200, &status)
+	if status.EdgeAvailable || status.Revision == 0 {
+		t.Fatalf("invalid Edge-unavailable instance status: %+v", status)
+	}
+	var workspaces struct {
+		Items []types.Workspace `json:"items"`
+	}
+	getResource("/v1/workspaces", 200, &workspaces)
+	if len(workspaces.Items) != 2 {
+		t.Fatalf("Edge loss did not preserve scoped workspaces: %+v", workspaces.Items)
+	}
+	for _, workspace := range workspaces.Items {
 		if workspace.ID != firstWorkspace && workspace.Name != "personal-"+firstUserID {
 			t.Fatal("Edge loss exposed a workspace outside the user's personal and assigned workspaces")
 		}
+	}
+	getResource("/v1/workspaces/"+foreignWorkspace, 404, nil)
+	getResource("/v1/workspaces/"+firstWorkspace+"/connections", 503, nil)
+	getResource("/v1/workspaces/"+firstWorkspace+"/flows", 503, nil)
+	getResource("/api/v1/state", 404, nil)
+	if consoleCalls != 1 {
+		t.Fatal("management API request fell through to the Console")
 	}
 }
 

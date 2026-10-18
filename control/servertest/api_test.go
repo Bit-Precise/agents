@@ -43,7 +43,7 @@ func TestManualApprovalThroughHTTPAPIAndSupervisor(t *testing.T) {
 	if h.connected(enrolled.Agent.ID, "provider") {
 		t.Fatal("pending provider connected before approval")
 	}
-	h.api("POST", "/api/v1/agents/"+enrolled.Agent.ID+"/approve", adminToken, nil, nil, 200)
+	h.api("PUT", "/v1/admin/agents/"+enrolled.Agent.ID+"/approval", adminToken, map[string]any{"expectedDesired": enrolled.Agent.Desired}, nil, 200)
 	await(t, func() bool { return h.connected(enrolled.Agent.ID, "provider") })
 	refreshed, err := client.Refresh(t.Context(), enrolled.Credentials)
 	if err != nil {
@@ -100,8 +100,8 @@ func TestBrowserSessionCSRFAndDisabledUser(t *testing.T) {
 		}
 		return resp, data
 	}
-	login, data := request("POST", "/api/v1/login", h.base, "", map[string]string{"token": adminToken})
-	if login.StatusCode != 200 {
+	login, data := request("POST", "/v1/sessions", h.base, "", map[string]string{"token": adminToken})
+	if login.StatusCode != 201 || login.Header.Get("Location") != "/v1/sessions/current" {
 		t.Fatalf("admin login: %d %s", login.StatusCode, data)
 	}
 	var logged struct {
@@ -115,36 +115,36 @@ func TestBrowserSessionCSRFAndDisabledUser(t *testing.T) {
 			t.Fatalf("unsafe or expired browser cookie: %+v", cookie)
 		}
 	}
-	resp, data := request("GET", "/api/v1/me", "", "", nil)
+	resp, data := request("GET", "/v1/sessions/current", "", "", nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("fresh bootstrap cookie not usable: %d %s", resp.StatusCode, data)
 	}
-	resp, _ = request("POST", "/api/v1/workspaces", h.base, "", map[string]string{"name": "forged"})
-	if resp.StatusCode < 400 {
-		t.Fatal("cookie mutation without CSRF accepted")
+	resp, _ = request("POST", "/v1/admin/workspaces", h.base, "", map[string]string{"name": "forged"})
+	if resp.StatusCode != 403 {
+		t.Fatalf("cookie mutation without CSRF returned %d, want 403", resp.StatusCode)
 	}
-	resp, _ = request("POST", "/api/v1/workspaces", "http://evil.example", logged.CSRF, map[string]string{"name": "forged"})
+	resp, _ = request("POST", "/v1/admin/workspaces", "http://evil.example", logged.CSRF, map[string]string{"name": "forged"})
 	if resp.StatusCode != 403 {
 		t.Fatalf("foreign Origin accepted: %d", resp.StatusCode)
 	}
-	resp, data = request("POST", "/api/v1/workspaces", h.base, logged.CSRF, map[string]string{"name": "legitimate"})
+	resp, data = request("POST", "/v1/admin/workspaces", h.base, logged.CSRF, map[string]string{"name": "legitimate"})
 	if resp.StatusCode != 201 {
 		t.Fatalf("valid cookie mutation failed: %d %s", resp.StatusCode, data)
 	}
-	resp, _ = request("POST", "/api/v1/logout", h.base, logged.CSRF, nil)
+	resp, _ = request("DELETE", "/v1/sessions/current", h.base, logged.CSRF, nil)
 	if resp.StatusCode != 204 {
 		t.Fatalf("logout status %d", resp.StatusCode)
 	}
-	resp, _ = request("GET", "/api/v1/me", "", "", nil)
+	resp, _ = request("GET", "/v1/sessions/current", "", "", nil)
 	if resp.StatusCode != 401 {
 		t.Fatal("logged out cookie retained access")
 	}
-	resp, data = request("POST", "/api/v1/login", h.base, "", map[string]string{"token": u.Token})
-	if resp.StatusCode != 200 {
+	resp, data = request("POST", "/v1/sessions", h.base, "", map[string]string{"token": u.Token})
+	if resp.StatusCode != 201 {
 		t.Fatalf("user login: %s", data)
 	}
-	h.api("DELETE", "/api/v1/users/"+u.User.ID, adminToken, nil, nil, 200)
-	resp, _ = request("GET", "/api/v1/me", "", "", nil)
+	h.api("PATCH", "/v1/admin/users/"+u.User.ID, adminToken, map[string]bool{"disabled": true}, nil, 200)
+	resp, _ = request("GET", "/v1/sessions/current", "", "", nil)
 	if resp.StatusCode != 401 {
 		t.Fatal("disabled user's existing cookie retained access")
 	}
@@ -160,12 +160,12 @@ func TestHTTPAPIPersistsRegistrationAcrossServerRestart(t *testing.T) {
 	database := h.cfg.Database.DSN
 	h.close()
 	restarted := startHarness(t, database, address)
-	var snapshot types.Snapshot
-	restarted.api("GET", "/api/v1/state", u.Token, nil, &snapshot, 200)
-	if len(snapshot.Agents) != 1 || snapshot.Agents[0].ID != enrolled.Agent.ID || len(snapshot.Workspaces) != 2 {
+	agents := readResourceList[types.Agent](restarted, "/v1/workspaces/"+w.ID+"/agents", u.Token)
+	workspaces := readResourceList[types.Workspace](restarted, "/v1/workspaces", u.Token)
+	if len(agents) != 1 || agents[0].ID != enrolled.Agent.ID || len(workspaces) != 2 {
 		t.Fatal("server restart lost scoped resource state")
 	}
-	for _, workspace := range snapshot.Workspaces {
+	for _, workspace := range workspaces {
 		if workspace.ID != w.ID && workspace.Name != "personal-"+u.User.ID {
 			t.Fatal("server restart exposed another user's workspace")
 		}
@@ -177,7 +177,7 @@ func TestHTTPAPIPersistsRegistrationAcrossServerRestart(t *testing.T) {
 	}
 }
 
-func TestSnapshotDoesNotLeakOtherWorkspaceSessions(t *testing.T) {
+func TestResourceListsDoNotLeakOtherWorkspaceSessions(t *testing.T) {
 	h := newHarness(t)
 	w1, alice := h.workspace("one", "alice")
 	w2, bob := h.workspace("two", "bob")
@@ -195,18 +195,23 @@ func TestSnapshotDoesNotLeakOtherWorkspaceSessions(t *testing.T) {
 	await(t, func() bool {
 		return h.connected(first.Agent.ID, "provider") && h.connected(second.Agent.ID, "provider")
 	})
-	var view struct {
-		types.Snapshot
+	view := struct {
+		Workspaces  []types.Workspace       `json:"workspaces"`
+		Agents      []types.Agent           `json:"agents"`
 		Connections []edge.ConnectionStatus `json:"connections"`
 		Flows       []edge.FlowStatus       `json:"flows"`
+	}{
+		Workspaces:  readResourceList[types.Workspace](h, "/v1/workspaces", alice.Token),
+		Agents:      readResourceList[types.Agent](h, "/v1/workspaces/"+w1.ID+"/agents", alice.Token),
+		Connections: readResourceList[edge.ConnectionStatus](h, "/v1/workspaces/"+w1.ID+"/connections", alice.Token),
+		Flows:       readResourceList[edge.FlowStatus](h, "/v1/workspaces/"+w1.ID+"/flows", alice.Token),
 	}
-	h.api("GET", "/api/v1/state", alice.Token, nil, &view, 200)
 	if len(view.Workspaces) != 2 {
-		t.Fatal("snapshot leaked another workspace")
+		t.Fatal("workspace list leaked another workspace")
 	}
 	for _, workspace := range view.Workspaces {
 		if workspace.ID != w1.ID && workspace.Name != "personal-"+alice.User.ID {
-			t.Fatal("snapshot exposed a workspace outside the user's personal and assigned workspaces")
+			t.Fatal("workspace list exposed a workspace outside the user's personal and assigned workspaces")
 		}
 	}
 	for _, a := range view.Agents {
@@ -219,37 +224,36 @@ func TestSnapshotDoesNotLeakOtherWorkspaceSessions(t *testing.T) {
 			t.Fatal("Edge session metadata leaked across workspace")
 		}
 	}
-	h.api("POST", "/api/v1/egress-routes", adminToken, types.EgressRoute{WorkspaceID: w2.ID, AgentID: first.Agent.ID, Name: "cross-tenant", Rule: tlsRule("example.com")}, nil, 403)
+	for _, resource := range []string{"agents", "connections", "flows"} {
+		h.api("GET", "/v1/workspaces/"+w2.ID+"/"+resource, alice.Token, nil, nil, 404)
+	}
+	h.api("POST", "/v1/admin/routes", adminToken, map[string]any{"workspaceId": w2.ID, "agentId": first.Agent.ID, "name": "cross-tenant", "rule": tlsRule("example.com"), "kind": "egress"}, nil, 403)
 	encoded, _ := json.Marshal(view)
 	if strings.Contains(string(encoded), second.Credentials.ProviderToken) || strings.Contains(string(encoded), second.Agent.ID) {
-		t.Fatal("foreign identity or secret escaped state filtering")
+		t.Fatal("foreign identity or secret escaped resource visibility filtering")
 	}
 }
 
 func TestBootstrapTokenRotationSurvivesHTTPServerRestart(t *testing.T) {
 	h := newHarness(t)
-	var me struct {
-		User types.User `json:"user"`
-	}
-	h.api("GET", "/api/v1/me", adminToken, nil, &me, 200)
+	var me types.User
+	h.api("GET", "/v1/users/me", adminToken, nil, &me, 200)
 	var rotated struct {
 		Token string `json:"token"`
 	}
-	h.api("POST", "/api/v1/users/"+me.User.ID+"/token", adminToken, nil, &rotated, 201)
+	h.api("POST", "/v1/users/me/tokens", adminToken, nil, &rotated, 201)
 	if rotated.Token == "" || rotated.Token == adminToken {
 		t.Fatal("rotation did not issue a new secret")
 	}
-	h.api("GET", "/api/v1/me", adminToken, nil, nil, 401)
-	h.api("GET", "/api/v1/me", rotated.Token, nil, nil, 200)
+	h.api("GET", "/v1/users/me", adminToken, nil, nil, 401)
+	h.api("GET", "/v1/users/me", rotated.Token, nil, nil, 200)
 	address, path := h.cfg.ListenAddress, h.cfg.Database.DSN
 	h.close()
 	restarted := startHarness(t, path, address)
-	restarted.api("GET", "/api/v1/me", adminToken, nil, nil, 401)
-	var restored struct {
-		User types.User `json:"user"`
-	}
-	restarted.api("GET", "/api/v1/me", rotated.Token, nil, &restored, 200)
-	if restored.User.ID != me.User.ID {
+	restarted.api("GET", "/v1/users/me", adminToken, nil, nil, 401)
+	var restored types.User
+	restarted.api("GET", "/v1/users/me", rotated.Token, nil, &restored, 200)
+	if restored.ID != me.ID {
 		t.Fatal("token rotation replaced stable administrator identity")
 	}
 }

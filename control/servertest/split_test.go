@@ -216,9 +216,9 @@ func testSplitServiceSSO(t *testing.T, h *harness, client *http.Client) {
 		}
 		return response
 	}
-	login := request(h.base, "POST", "/api/v1/login", "", nil, `{"token":"`+u.Token+`"}`, false)
+	login := request(h.base, "POST", "/v1/sessions", "", nil, `{"token":"`+u.Token+`"}`, false)
 	loginCookies := login.Cookies()
-	readResponse(t, login, 200)
+	readResponse(t, login, 201)
 	first := request(h.edgeBase, "GET", "/", "", nil, "", true)
 	stateCookies := first.Cookies()
 	authorize, _ := url.Parse(first.Header.Get("Location"))

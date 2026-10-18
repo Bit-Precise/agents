@@ -11,7 +11,8 @@
     "generate": "openapi-ts",
     "check:generated": "npm run generate && git diff --exit-code -- src/api/generated",
     "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck && vite build"
+    "build": "npm run typecheck && vite build",
+    "test:ui": "npm run build && node --test tests/rest-navigation.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
@@ -30,6 +31,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
+    "playwright-core": "1.64.1",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vite": "8.3.4"

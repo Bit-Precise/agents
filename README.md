@@ -61,7 +61,7 @@ make race
 helm lint charts/agents --strict
 ```
 
-Console 使用 React、TypeScript、shadcn/ui。前端 API 类型、客户端和操作函数由 [OpenAPI 契约](api/openapi.json) 生成；修改契约后执行 `make generate`，CI 会检查生成文件与构建产物是否同步。
+Console 使用 React、TypeScript、shadcn/ui。前端 API 类型、客户端和操作函数由 [OpenAPI 契约](api/openapi.json) 生成；修改契约后执行 `make generate`，CI 会检查生成文件与构建产物是否同步。管理 API 按 `/v1/admin/*` 和 `/v1/workspaces/{workspaceId}/*` 区分实例管理与工作空间资源，所有集合支持编号分页和服务端筛选；旧聚合 `/api/v1/state` 已移除。设备控制、OAuth 和 XHTTP 协议保持兼容。
 
 认证支持标准 OIDC discovery、授权码 + PKCE、state/nonce 和 ID token 校验，并按 issuer + subject 绑定用户。新用户获得仅自己为 owner 的 `personal-<userID>` Workspace，已有用户不补建。配置中的 bootstrap 管理员 subject 仅首次创建账户时生效；`oidc.adminEmails` 可按已验证邮箱授予实例管理员，要求 ID token 的 `email_verified` 为布尔值 `true`，移除名单后重启 Control 会撤销邮箱派生的管理员权限。Token 登录保留给自动化与应急管理。
 

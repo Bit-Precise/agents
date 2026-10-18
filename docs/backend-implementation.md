@@ -46,6 +46,8 @@ erDiagram
 
 图中的 EnrollmentKey → Agent 表示注册过程中的关系；Agent 不保留注册密钥的外键。
 
+Service 和 EgressRoute 是内部持久实体。管理 API 将它们投影成安全的 ServerView 和 RouteView；角色集合 ingresses、egresses 是同一 Agent 的不同能力视图，servers 则可以包含一个 Agent 提供的多个服务。Grant 授予的是业务访问权，不会单独让 Workspace 出现在用户的管理列表中；管理可见性仍取决于 Membership 与实例管理员身份。
+
 默认新 Service 创建一次、有效 24 小时的本 Workspace 成员 Grant；Egress 不自动生成 Grant。重新批准不会恢复已撤销的默认授权。
 
 ## 注册与连接状态
@@ -114,24 +116,33 @@ Egress 路径：
 
 ## 主要接口
 
-所有 JSON 接口位于 `/api/v1`，除首次注册和登录外需相应身份。管理 API 可用 User Bearer；浏览器 Cookie 写操作还需同源 Origin 和 `X-CSRF-Token`。
+管理 REST API 位于 `/v1`，完整请求和响应见 [OpenAPI](../api/openapi.json)。管理员的全局资源位于 `/v1/admin/`，普通用户从 `/v1/workspaces` 选择工作空间后使用 `/v1/workspaces/{workspaceId}/...` 子资源。所有管理员路由先验证实例管理员身份；普通列表和详情按现有成员、owner/maintainer 和资源归属规则裁剪，筛选参数只缩小可见范围。不可见的资源详情返回 404。
 
-| 接口 | 用途 |
+| 资源路径 | 方法与用途 |
 |---|---|
-| `POST /login`、`POST /logout`、`GET /me` | 控制台会话 |
-| `GET /info`、`GET /state` | 实例入口、按身份过滤的持久和在线视图 |
-| `POST /users`、`DELETE /users/{id}`、`POST /users/{id}/token` | 创建用户、停用、更新令牌 |
-| `POST /workspaces`、`POST /memberships` | Workspace 与角色管理 |
-| `DELETE /memberships/{workspace}/{user}` | 移除成员并撤销其设备 |
-| `POST /enrollment-keys`、`DELETE /enrollment-keys/{id}` | 创建/撤销设备注册密钥 |
-| `POST /enroll` | 注册新 profile |
-| `GET /agent/credentials`、`POST /agent/config` | 设备刷新批准、提交本地意图 |
-| `POST /agents/{id}/approve`、`POST /agents/{id}/revoke` | 批准/撤销设备 |
-| `POST /egress-routes`、`DELETE /egress-routes/{id}`、`POST /egress-routes/{id}/enable` | 创建、停用、恢复指定出口规则 |
-| `DELETE /services/{id}`、`POST /services/{id}/enable` | 停用、恢复发布 |
-| `POST /grants`、`DELETE /grants/{id}` | 限时授权及撤销 |
+| `/v1/instance`、`/v1/instance/status` | GET 公开入口信息、认证后的 revision/Edge 可用性；不返回实体快照 |
+| `/v1/sessions`、`/v1/sessions/current` | POST 创建 Cookie 会话（201）；GET 当前 Cookie 会话；DELETE 退出（204） |
+| `/v1/users/me`、`/v1/users/me/tokens` | GET 当前用户；POST 替换自己的用户 Token（201，一次性返回新秘密） |
+| `/v1/admin/users`、`/v1/admin/workspaces`、`/v1/admin/agents` | GET 分页列表与 `/{id}` 详情；用户和 Workspace 创建仅在 admin 命名空间，POST 返回 201 |
+| `/v1/admin/users/{id}`、`/v1/admin/users/{id}/tokens` | PATCH `{disabled:true}` 停用；POST 替换指定用户 Token |
+| `/v1/workspaces/{workspaceId}/users` | GET 当前空间可见成员的安全用户资料；非管理员没有实例全局用户目录 |
+| Workspace 的 `/agents`、`/ingresses`、`/servers`、`/egresses`、`/routes` | GET 设备、访问端角色、发布服务、出口提供方角色和路由的独立分页视图；有对应详情接口 |
+| Workspace 的 `/agents/{agentId}`、`/agents/{agentId}/approval` | PATCH `{status:"revoked"}` 撤销；PUT `{expectedDesired:...}` 原子核对并批准审核过的配置，并发改变返回 409 |
+| Workspace 的 `/servers/{serviceId}`、`/routes/{routeId}` | PATCH `{enabled:boolean}` 更新启用状态；POST `/routes` 仅创建 `kind:"egress"` 的出口路由，服务路由由设备配置产生 |
+| Workspace 的 `/memberships`、`/memberships/{userId}` | GET 列表/详情；PUT `{role}` 幂等设置成员（200）；DELETE 移除（204） |
+| Workspace 的 `/enrollment-keys`、`/grants` | GET 列表与详情；POST 创建（201）；PATCH 单项 `{revoked:true}` 撤销，不能恢复 |
+| Workspace 的 `/connections`、`/flows` | GET 可见在线连接和流；Edge 不可用返回 503，不能将其误认为空列表 |
+| `/v1/admin/audit-events` | GET 仅管理员可见的分页审计记录和详情 |
 
-`/agent` 是独立 XHTTP 入口；`/auth/authorize` 和服务域的 `/__agents/callback` 是浏览器服务登录兑换，不是源站 API。
+管理员还具有全局 `ingresses`、`servers`、`egresses`、`routes`、`memberships`、`enrollment-keys`、`grants`、`connections`、`flows` 列表和相应资源操作；每个端点的参数以 OpenAPI 为准。Workspace 子路径的创建请求不接收 `workspaceId`，资源归属由 URL 决定；admin 创建请求显式携带它。PATCH 使用独立输入结构，只接受声明的字段，不开放通用实体修改。
+
+Agent 是设备身份，可以同时承担 ingress 和 egress 角色，也可以提供多个 server。角色视图仅嵌入 `AgentSummary {id,name,status,roles,pendingApproval}`，不泄露完整 Desired、批准配置或源站地址。Route 明确包含 `kind:serve|egress` 和 `targetType:server|egress`；服务路由引用 Service，出口路由引用指定 Agent，路由 ID 与设备 ID 不能混用。完整配置只由授权的 Agent 详情返回。
+
+集合统一返回 `{items:[],pagination:{page,pageSize,total,totalPages}}`。`page` 默认 1，`pageSize` 默认 20、最大 100；越界页返回空数组。服务端先授权，再筛选和排序，最后统计及分页。`sortBy` 仅接受资源支持的字段，`sortOrder` 为 `asc|desc`，并使用稳定 ID 处理相同排序值。可用筛选包括名称 `q`、Workspace、用户、状态、启用/撤销状态、资源引用等，详见每个集合的 OpenAPI 参数。无效或未知查询参数返回 400。列表是实时读取，不保证多个请求构成同一事务快照。
+
+旧聚合 `/api/v1/state` 和旧管理动作路径已删除，不再返回 SPA HTML。Console 按当前页面、工作空间和页码调用资源 API，表单候选独立搜索和分页；身份或 Workspace 改变会取消旧请求。管理资源支持 User Bearer 或 Cookie；浏览器 Cookie 写请求同时要求同源 Origin 和内存 CSRF Token。`/v1/sessions/current` 仅表示实际 Cookie 会话，Bearer 身份应读取 `/v1/users/me`。错误保持 `{error:{kind,message}}`：未认证 401、已认证但权限/CSRF 被拒 403、不可见资源 404、状态冲突 409、超大 JSON 413、媒体类型不支持 415、依赖不可用 503。
+
+设备控制协议保持 `POST /api/v1/enroll`、`GET /api/v1/agent/credentials`、`POST /api/v1/agent/config`，既有 agentd 无需因管理 API 迁移而升级。`/agent` 是独立 XHTTP 入口；`/auth/oidc/login`、`/auth/oidc/callback`、`/auth/authorize` 和服务域 `/__agents/callback` 保持浏览器认证协议，内部 Control/Edge RPC 也不在本次迁移范围。
 
 ## 已验证与未实现
 

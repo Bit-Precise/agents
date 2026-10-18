@@ -62,9 +62,9 @@ func TestPlatformBearerNeverLeaksToOriginWithServiceCookie(t *testing.T) {
 		}
 		return resp
 	}
-	login := request("POST", "/api/v1/login", "", "", nil, map[string]string{"token": u.Token}, false)
+	login := request("POST", "/v1/sessions", "", "", nil, map[string]string{"token": u.Token}, false)
 	loginCookies := login.Cookies()
-	readResponse(t, login, 200)
+	readResponse(t, login, 201)
 	serverURL, _ := url.Parse(h.base)
 	host := serviceHost("demo", w.Name) + ":" + serverURL.Port()
 	first := request("GET", "/", host, "", nil, nil, true)
@@ -84,8 +84,8 @@ func TestPlatformBearerNeverLeaksToOriginWithServiceCookie(t *testing.T) {
 	serviceCookies := callback.Cookies()
 	readResponse(t, callback, http.StatusSeeOther)
 	var disabled userCredential
-	h.api("POST", "/api/v1/users", adminToken, map[string]any{"name": "disabled", "admin": false}, &disabled, 201)
-	h.api("DELETE", "/api/v1/users/"+disabled.User.ID, adminToken, nil, nil, 200)
+	h.api("POST", "/v1/admin/users", adminToken, map[string]any{"name": "disabled", "admin": false}, &disabled, 201)
+	h.api("PATCH", "/v1/admin/users/"+disabled.User.ID, adminToken, map[string]bool{"disabled": true}, nil, 200)
 	for _, platformToken := range []string{enrolled.Credentials.ControlToken, enrolled.Credentials.ProviderToken, disabled.Token} {
 		response := request("GET", "/", host, platformToken, serviceCookies, nil, false)
 		readResponse(t, response, 401)

@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -124,13 +126,50 @@ type userCredential struct {
 	Token string     `json:"token"`
 }
 
+// readResourceList composes numbered resource pages explicitly for tests that
+// need to inspect all visible records. It never substitutes an aggregate API.
+func readResourceList[T any](h *harness, path, token string) []T {
+	h.t.Helper()
+	resourceURL, err := url.Parse(path)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	items := []T{}
+	for page := 1; ; page++ {
+		query := resourceURL.Query()
+		query.Set("page", strconv.Itoa(page))
+		query.Set("pageSize", "100")
+		resourceURL.RawQuery = query.Encode()
+		var result struct {
+			Items      []T `json:"items"`
+			Pagination struct {
+				Page       int `json:"page"`
+				PageSize   int `json:"pageSize"`
+				Total      int `json:"total"`
+				TotalPages int `json:"totalPages"`
+			} `json:"pagination"`
+		}
+		h.api("GET", resourceURL.String(), token, nil, &result, http.StatusOK)
+		if result.Items == nil || result.Pagination.Page != page || result.Pagination.PageSize != 100 {
+			h.t.Fatalf("invalid resource page from %s: %+v", resourceURL, result)
+		}
+		items = append(items, result.Items...)
+		if page >= result.Pagination.TotalPages {
+			if len(items) != result.Pagination.Total {
+				h.t.Fatalf("resource total from %s: got %d items, total %d", resourceURL, len(items), result.Pagination.Total)
+			}
+			return items
+		}
+	}
+}
+
 func (h *harness) workspace(name, userName string) (types.Workspace, userCredential) {
 	h.t.Helper()
 	var w types.Workspace
 	var u userCredential
-	h.api("POST", "/api/v1/workspaces", adminToken, map[string]string{"name": name}, &w, 201)
-	h.api("POST", "/api/v1/users", adminToken, map[string]any{"name": userName, "admin": false}, &u, 201)
-	h.api("POST", "/api/v1/memberships", adminToken, types.Membership{WorkspaceID: w.ID, UserID: u.User.ID, Role: "developer"}, nil, 201)
+	h.api("POST", "/v1/admin/workspaces", adminToken, map[string]string{"name": name}, &w, 201)
+	h.api("POST", "/v1/admin/users", adminToken, map[string]any{"name": userName, "admin": false}, &u, 201)
+	h.api("PUT", "/v1/admin/workspaces/"+w.ID+"/memberships/"+u.User.ID, adminToken, map[string]string{"role": "developer"}, nil, 200)
 	return w, u
 }
 
@@ -140,7 +179,7 @@ func (h *harness) enroll(cfg *config.Config, w types.Workspace, u userCredential
 		Key   types.EnrollmentKey `json:"key"`
 		Token string              `json:"token"`
 	}
-	h.api("POST", "/api/v1/enrollment-keys", adminToken, types.EnrollmentKey{WorkspaceID: w.ID, UserID: u.User.ID, Roles: roles, MaxUses: 1, AutoApprove: auto, ExpiresAt: time.Now().Add(time.Hour)}, &key, 201)
+	h.api("POST", "/v1/admin/enrollment-keys", adminToken, map[string]any{"workspaceId": w.ID, "userId": u.User.ID, "roles": roles, "maxUses": 1, "autoApprove": auto, "expiresAt": time.Now().Add(time.Hour)}, &key, 201)
 	client, err := controlclient.New(cfg)
 	if err != nil {
 		h.t.Fatal(err)
@@ -275,8 +314,8 @@ func (h *harness) grantRoute(w types.Workspace, u userCredential, agentID, domai
 	h.t.Helper()
 	var r types.EgressRoute
 	var g types.Grant
-	h.api("POST", "/api/v1/egress-routes", adminToken, types.EgressRoute{WorkspaceID: w.ID, AgentID: agentID, Name: name, Rule: tlsRule(domain)}, &r, 201)
-	h.api("POST", "/api/v1/grants", adminToken, types.Grant{WorkspaceID: w.ID, ResourceType: "egress", ResourceID: r.ID, SubjectType: "user", SubjectID: u.User.ID, ExpiresAt: time.Now().Add(time.Hour)}, &g, 201)
+	h.api("POST", "/v1/admin/routes", adminToken, map[string]any{"workspaceId": w.ID, "agentId": agentID, "name": name, "rule": tlsRule(domain), "kind": "egress"}, &r, 201)
+	h.api("POST", "/v1/admin/grants", adminToken, map[string]any{"workspaceId": w.ID, "resourceType": "egress", "resourceId": r.ID, "subjectType": "user", "subjectId": u.User.ID, "expiresAt": time.Now().Add(time.Hour)}, &g, 201)
 	return r, g
 }
 

@@ -20,7 +20,6 @@ import (
 	"github.com/bit-precise/agentd/config"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agentd/supervisor"
-	"github.com/bit-precise/agents/control/types"
 	"github.com/bit-precise/agents/edge"
 )
 
@@ -256,7 +255,7 @@ func testHTTPAndSOCKSEgressOnHarness(t *testing.T, h *harness, shortLeases bool)
 			t.Fatalf("Serve stream did not survive policy renewals: %q %v", line, err)
 		}
 	}
-	h.api("DELETE", "/api/v1/grants/"+grant.ID, adminToken, nil, nil, 200)
+	h.api("PATCH", "/v1/admin/grants/"+grant.ID, adminToken, map[string]bool{"revoked": true}, nil, 200)
 	select {
 	case <-targetCanceled:
 	case <-time.After(4 * time.Second):
@@ -308,5 +307,5 @@ func TestAccessProfileCannotUseAnotherWorkspacesRoute(t *testing.T) {
 	if dials.Load() != 0 {
 		t.Fatal("cross-workspace denial still dialed private target")
 	}
-	h.api("POST", "/api/v1/grants", adminToken, types.Grant{WorkspaceID: w2.ID, ResourceType: "egress", ResourceID: route.ID, SubjectType: "user", SubjectID: bob.User.ID, ExpiresAt: time.Now().Add(time.Hour)}, nil, 403)
+	h.api("POST", "/v1/admin/grants", adminToken, map[string]any{"workspaceId": w2.ID, "resourceType": "egress", "resourceId": route.ID, "subjectType": "user", "subjectId": bob.User.ID, "expiresAt": time.Now().Add(time.Hour)}, nil, 403)
 }

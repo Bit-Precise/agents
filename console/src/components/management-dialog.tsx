@@ -1,14 +1,12 @@
+import { ResourceSelect } from "./resource-select";
+import { addServers, addRoutes, mergeBy } from "@/lib/load-view";
+import type { ServerView, RouteView } from "@/api/generated";
+import type { ConsoleView as State } from "@/lib/view";
 import { useEffect, useState, type FormEvent } from "react";
 import { Check, Copy, Download, LoaderCircle } from "lucide-react";
 import * as sdk from "@/api/generated/sdk.gen";
-import type {
-  Agent,
-  CreateGrant,
-  Membership,
-  State,
-  User,
-} from "@/api/generated";
-import { result, message, requestSignal } from "@/api/session";
+import type { Agent, CreateGrant, Membership, User } from "@/api/generated";
+import { result, message, requestSignal, APIFailure } from "@/api/session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,7 +40,12 @@ export type Secret = {
   filename: string;
 };
 export type FormKind =
-  "workspace" | "user" | "member" | "key" | "route" | "grant";
+  | "workspace"
+  | "user"
+  | "member"
+  | "key"
+  | "route"
+  | "grant";
 export type FormRequest = {
   kind: FormKind;
   resource?: { id: string; workspaceId: string; type: "service" | "egress" };
@@ -73,7 +76,7 @@ const descriptions: Record<FormKind, string> = {
 
 export function ManagementDialog({
   request,
-  state,
+  state: initialState,
   user,
   workspace,
   onClose,
@@ -86,6 +89,11 @@ export function ManagementDialog({
   onClose: () => void;
   onComplete: (secret?: Secret) => void;
 }) {
+  const [state, setState] = useState(initialState);
+  const [contextLoading, setContextLoading] = useState(false);
+  const [resourceKind, setResourceKind] = useState<"service" | "egress">(
+    request.resource?.type || "service",
+  );
   const data = rows(state),
     kind = request.kind;
   const permission = (id: string) =>
@@ -129,11 +137,6 @@ export function ManagementDialog({
       .filter((m) => m.workspaceId === workspaceID)
       .map((m) => m.userId),
   );
-  const eligibleUsers = data.users.filter(
-    (u) =>
-      !u.disabled &&
-      (kind !== "key" || (members.has(u.id) && (manager || u.id === user.id))),
-  );
   const guest = data.memberships.some(
     (m) =>
       m.workspaceId === workspaceID &&
@@ -165,14 +168,6 @@ export function ManagementDialog({
       .map((r) => ({ value: "egress:" + r.id, label: "出口 · " + r.name })),
   ];
   const localSubjects = target.startsWith("egress:") || !manager;
-  const subjectChoices =
-    subjectType === "workspace"
-      ? data.workspaces
-          .filter((w) => !localSubjects || w.id === workspaceID)
-          .map((w) => ({ value: w.id, label: w.name }))
-      : data.users
-          .filter((u) => !u.disabled && (!localSubjects || members.has(u.id)))
-          .map((u) => ({ value: u.id, label: u.name }));
   useEffect(() => {
     if (kind === "key") setUserID(members.has(user.id) ? user.id : "");
   }, [workspaceID, kind, user.id]);
@@ -191,7 +186,7 @@ export function ManagementDialog({
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || contextLoading) return;
     setBusy(true);
     setError("");
     try {
@@ -200,14 +195,14 @@ export function ManagementDialog({
         throw new Error("请选择工作空间。");
       if (kind === "workspace")
         result(
-          await sdk.createWorkspace({
+          await sdk.createAdminWorkspace({
             body: { name: nameValue.trim() },
             signal: requestSignal(),
           }),
         );
       if (kind === "user") {
         const response = result(
-          await sdk.createUser({
+          await sdk.createAdminUser({
             body: { name: nameValue.trim() },
             signal: requestSignal(),
           }),
@@ -220,12 +215,19 @@ export function ManagementDialog({
         };
       }
       if (kind === "member") {
-        if (!userID) throw new Error("请选择用户。");
+        if (!userID) throw new Error("请选择或填写用户 ID。");
         result(
-          await sdk.setMembership({
-            body: { workspaceId: workspaceID, userId: userID, role },
-            signal: requestSignal(),
-          }),
+          user.admin
+            ? await sdk.putAdminMembership({
+                path: { workspaceId: workspaceID, userId: userID.trim() },
+                body: { role },
+                signal: requestSignal(),
+              })
+            : await sdk.putMembership({
+                path: { workspaceId: workspaceID, userId: userID.trim() },
+                body: { role },
+                signal: requestSignal(),
+              }),
         );
       }
       if (kind === "key") {
@@ -233,18 +235,24 @@ export function ManagementDialog({
           throw new Error("请选择注册用户与至少一种角色。");
         if (new Date(expires) <= new Date())
           throw new Error("失效时间必须晚于当前时间。");
+        const body = {
+          userId: userID,
+          roles,
+          autoApprove: manager && autoApprove,
+          maxUses: Number(uses),
+          expiresAt: new Date(expires).toISOString(),
+        };
         const response = result(
-          await sdk.createEnrollmentKey({
-            body: {
-              workspaceId: workspaceID,
-              userId: userID,
-              roles,
-              autoApprove: manager && autoApprove,
-              maxUses: Number(uses),
-              expiresAt: new Date(expires).toISOString(),
-            },
-            signal: requestSignal(),
-          }),
+          user.admin
+            ? await sdk.createAdminEnrollmentKey({
+                body: { ...body, workspaceId: workspaceID },
+                signal: requestSignal(),
+              })
+            : await sdk.createWorkspaceEnrollmentKey({
+                path: { workspaceId: workspaceID },
+                body,
+                signal: requestSignal(),
+              }),
         );
         secret = {
           title: "注册密钥已生成",
@@ -264,22 +272,28 @@ export function ManagementDialog({
           new Set(values).size !== values.length
         )
           throw new Error("端口必须是 1–65535 的整数且不能重复。");
+        const body = {
+          kind: "egress" as const,
+          agentId: agentID,
+          name: nameValue.trim(),
+          rule: {
+            domain: { [match]: domain.trim() },
+            ports: values,
+            protocol: "tls" as const,
+          },
+          priority: Number(priority),
+        };
         result(
-          await sdk.createEgressRoute({
-            body: {
-              workspaceId: workspaceID,
-              agentId: agentID,
-              name: nameValue.trim(),
-              rule: {
-                domain: { [match]: domain.trim() },
-                ports: values,
-                protocol: "tls",
-              },
-              priority: Number(priority),
-              enabled: true,
-            },
-            signal: requestSignal(),
-          }),
+          user.admin
+            ? await sdk.createAdminRoute({
+                body: { ...body, workspaceId: workspaceID },
+                signal: requestSignal(),
+              })
+            : await sdk.createWorkspaceRoute({
+                path: { workspaceId: workspaceID },
+                body,
+                signal: requestSignal(),
+              }),
         );
       }
       if (kind === "grant") {
@@ -292,19 +306,25 @@ export function ManagementDialog({
           throw new Error("截止时间必须晚于开始时间和当前时间。");
         const colon = target.indexOf(":");
         const resourceType = target.slice(0, colon) as "service" | "egress";
+        const body = {
+          resourceType,
+          resourceId: target.slice(colon + 1),
+          subjectType,
+          subjectId: subjectType === "anonymous" ? undefined : subjectID.trim(),
+          startsAt: new Date(starts).toISOString(),
+          expiresAt: new Date(expires).toISOString(),
+        };
         result(
-          await sdk.createGrant({
-            body: {
-              workspaceId: workspaceID,
-              resourceType,
-              resourceId: target.slice(colon + 1),
-              subjectType,
-              subjectId: subjectType === "anonymous" ? undefined : subjectID,
-              startsAt: new Date(starts).toISOString(),
-              expiresAt: new Date(expires).toISOString(),
-            },
-            signal: requestSignal(),
-          }),
+          user.admin
+            ? await sdk.createAdminGrant({
+                body: { ...body, workspaceId: workspaceID },
+                signal: requestSignal(),
+              })
+            : await sdk.createWorkspaceGrant({
+                path: { workspaceId: workspaceID },
+                body,
+                signal: requestSignal(),
+              }),
         );
       }
       onComplete(secret);
@@ -316,14 +336,75 @@ export function ManagementDialog({
   }
   const workspaceField = (
     <Field label="工作空间">
-      <ChoiceSelect
+      <ResourceSelect
+        resource="workspaces"
+        user={user}
         label="工作空间"
         value={workspaceID}
-        onChange={changeWorkspace}
-        options={workspaces.map((w) => ({ value: w.id, label: w.name }))}
+        valueLabel={data.workspaces.find((w) => w.id === workspaceID)?.name}
+        onSelect={(w) => {
+          setState((s) => ({
+            ...s,
+            workspaces: mergeBy(
+              s.workspaces,
+              [w as unknown as (typeof s.workspaces)[number]],
+              (x) => x.id,
+            ),
+          }));
+          changeWorkspace(w.id);
+        }}
       />
     </Field>
   );
+  useEffect(() => {
+    if (!workspaceID || !["key", "member", "grant", "route"].includes(kind))
+      return;
+    const abort = new AbortController();
+    setContextLoading(true);
+    const ids = [
+      ...new Set([user.id, ...(kind === "key" && userID ? [userID] : [])]),
+    ];
+    void Promise.allSettled(
+      ids.map(async (id) => {
+        const response = user.admin
+          ? await sdk.getAdminMembership({
+              path: { workspaceId: workspaceID, userId: id },
+              signal: abort.signal,
+            })
+          : await sdk.getMembership({
+              path: { workspaceId: workspaceID, userId: id },
+              signal: abort.signal,
+            });
+        const m = result(response);
+        return m;
+      }),
+    ).then((outcomes) => {
+      if (abort.signal.aborted) return;
+      const memberships = outcomes.flatMap((x) =>
+        x.status === "fulfilled" ? [x.value] : [],
+      );
+      setState((s) => ({
+        ...s,
+        memberships: [
+          ...s.memberships.filter(
+            (m) => m.workspaceId !== workspaceID || !ids.includes(m.userId),
+          ),
+          ...memberships,
+        ],
+      }));
+      const failed = outcomes.find(
+        (x) =>
+          x.status === "rejected" &&
+          !(x.reason instanceof APIFailure && x.reason.status === 404),
+      );
+      if (failed?.status === "rejected") setError(message(failed.reason));
+      setContextLoading(false);
+    });
+    return () => abort.abort();
+  }, [workspaceID, userID, kind, user.id, user.admin]);
+  useEffect(() => {
+    if (kind === "key" && !userID && members.has(user.id)) setUserID(user.id);
+  }, [kind, workspaceID, state.memberships, userID, user.id]);
   return (
     <Dialog
       open
@@ -362,15 +443,35 @@ export function ManagementDialog({
               label={kind === "key" ? "注册用户" : "用户"}
               hint={kind === "key" ? "用户需要先加入所选工作空间。" : undefined}
             >
-              <ChoiceSelect
+              <ResourceSelect
+                resource="users"
+                user={user}
+                workspace={kind === "key" || !user.admin ? workspaceID : ""}
+                filters={{ disabled: false }}
                 label="用户"
                 value={userID}
-                onChange={setUserID}
-                options={eligibleUsers.map((u) => ({
-                  value: u.id,
-                  label: u.name,
-                }))}
+                valueLabel={data.users.find((u) => u.id === userID)?.name}
+                disabled={!workspaceID}
+                onSelect={(u) => {
+                  setState((s) => ({
+                    ...s,
+                    users: mergeBy(
+                      s.users,
+                      [u as unknown as User],
+                      (x) => x.id,
+                    ),
+                  }));
+                  setUserID(u.id);
+                }}
               />
+              {kind === "member" && (
+                <Input
+                  aria-label="已知用户 ID"
+                  placeholder="也可填写已知用户 ID"
+                  value={userID}
+                  onChange={(e) => setUserID(e.target.value)}
+                />
+              )}
             </Field>
           )}
           {kind === "member" && (
@@ -447,14 +548,27 @@ export function ManagementDialog({
           {kind === "route" && (
             <>
               <Field label="指定出口 Agent">
-                <ChoiceSelect
+                <ResourceSelect
+                  resource="agents"
+                  user={user}
+                  workspace={workspaceID}
+                  filters={{ status: "active" }}
+                  label="出口 Agent"
                   value={agentID}
-                  onChange={setAgentID}
-                  label="指定出口 Agent"
-                  options={eligibleAgents.map((a) => ({
-                    value: a.id,
-                    label: a.name,
-                  }))}
+                  valueLabel={data.agents.find((a) => a.id === agentID)?.name}
+                  disabled={!workspaceID}
+                  onSelect={(value) => {
+                    const agent = value as unknown as Agent;
+                    if (!agent.desired.egress.enabled) {
+                      setError("此设备未声明出口能力，请选择出口提供方。");
+                      return;
+                    }
+                    setState((s) => ({
+                      ...s,
+                      agents: mergeBy(s.agents, [agent], (x) => x.id),
+                    }));
+                    setAgentID(agent.id);
+                  }}
                 />
               </Field>
               {agentID && (
@@ -531,13 +645,40 @@ export function ManagementDialog({
             <>
               <Field label="服务或出口规则">
                 <ChoiceSelect
-                  label="资源"
-                  value={target}
+                  label="资源类型"
+                  value={resourceKind}
                   onChange={(v) => {
-                    setTarget(v);
+                    setResourceKind(v as "service" | "egress");
+                    setTarget("");
+                  }}
+                  options={[
+                    { value: "service", label: "发布服务" },
+                    { value: "egress", label: "出口路由" },
+                  ]}
+                />
+                <ResourceSelect
+                  resource={resourceKind === "service" ? "servers" : "routes"}
+                  user={user}
+                  workspace={workspaceID}
+                  filters={{
+                    enabled: true,
+                    ...(resourceKind === "egress" ? { kind: "egress" } : {}),
+                  }}
+                  label="资源"
+                  value={target.split(":")[1] || ""}
+                  valueLabel={targets.find((t) => t.value === target)?.label}
+                  disabled={!workspaceID}
+                  onSelect={(value) => {
+                    setState((s) => {
+                      const next = { ...s };
+                      if (resourceKind === "service")
+                        addServers(next, [value as unknown as ServerView]);
+                      else addRoutes(next, [value as unknown as RouteView]);
+                      return next;
+                    });
+                    setTarget(resourceKind + ":" + value.id);
                     setSubjectID("");
                   }}
-                  options={targets}
                 />
               </Field>
               <div className="form-grid">
@@ -564,12 +705,45 @@ export function ManagementDialog({
                   {subjectType === "anonymous" ? (
                     <Input value="任何人，无需登录" readOnly />
                   ) : (
-                    <ChoiceSelect
-                      value={subjectID}
-                      onChange={setSubjectID}
-                      label="授权对象"
-                      options={subjectChoices}
-                    />
+                    <div className="space-y-2">
+                      {subjectType === "workspace" && localSubjects ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setSubjectID(workspaceID)}
+                        >
+                          {name(state, "workspaces", workspaceID)}
+                          {subjectID === workspaceID ? " ✓" : ""}
+                        </Button>
+                      ) : (
+                        <ResourceSelect
+                          resource={
+                            subjectType === "workspace" ? "workspaces" : "users"
+                          }
+                          user={user}
+                          workspace={
+                            subjectType === "user" &&
+                            (localSubjects || !user.admin)
+                              ? workspaceID
+                              : ""
+                          }
+                          filters={
+                            subjectType === "user" ? { disabled: false } : {}
+                          }
+                          label="授权对象"
+                          value={subjectID}
+                          onSelect={(value) => setSubjectID(value.id)}
+                        />
+                      )}{" "}
+                      {!localSubjects && (
+                        <Input
+                          aria-label="已知授权对象 ID"
+                          placeholder="也可填写已知对象 ID"
+                          value={subjectID}
+                          onChange={(e) => setSubjectID(e.target.value)}
+                        />
+                      )}
+                    </div>
                   )}
                 </Field>
               </div>
@@ -605,7 +779,7 @@ export function ManagementDialog({
             >
               取消
             </Button>
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy || contextLoading}>
               {busy && <LoaderCircle className="animate-spin" />}
               {busy
                 ? "正在提交…"
@@ -771,10 +945,20 @@ export function AgentDialog({
                 setBusy(true);
                 try {
                   result(
-                    await sdk.approveAgent({
-                      path: { id: agent.id },
-                      signal: requestSignal(),
-                    }),
+                    user.admin
+                      ? await sdk.putAdminAgentApproval({
+                          path: { id: agent.id },
+                          body: { expectedDesired: agent.desired },
+                          signal: requestSignal(),
+                        })
+                      : await sdk.putWorkspaceAgentApproval({
+                          path: {
+                            workspaceId: agent.workspaceId,
+                            agentId: agent.id,
+                          },
+                          body: { expectedDesired: agent.desired },
+                          signal: requestSignal(),
+                        }),
                   );
                   onComplete();
                 } catch (e) {

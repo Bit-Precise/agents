@@ -1,4 +1,5 @@
-import type { Agent, Grant, Rule, State, User } from "@/api/generated";
+import type { ConsoleView as State } from "./view";
+import type { Agent, Grant, Rule, User } from "@/api/generated";
 
 export type Tone = "good" | "warn" | "bad" | "muted" | "info";
 export type Health = { label: string; tone: Tone };

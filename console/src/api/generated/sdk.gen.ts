@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { ApproveAgentData, ApproveAgentErrors, ApproveAgentResponses, AuthorizeServiceData, AuthorizeServiceErrors, AuthorizeServiceResponses, CreateEgressRouteData, CreateEgressRouteErrors, CreateEgressRouteResponses, CreateEnrollmentKeyData, CreateEnrollmentKeyErrors, CreateEnrollmentKeyResponses, CreateGrantData, CreateGrantErrors, CreateGrantResponses, CreateUserData, CreateUserErrors, CreateUserResponses, CreateWorkspaceData, CreateWorkspaceErrors, CreateWorkspaceResponses, DisableEgressRouteData, DisableEgressRouteErrors, DisableEgressRouteResponses, DisableServiceData, DisableServiceErrors, DisableServiceResponses, DisableUserData, DisableUserErrors, DisableUserResponses, EnableEgressRouteData, EnableEgressRouteErrors, EnableEgressRouteResponses, EnableServiceData, EnableServiceErrors, EnableServiceResponses, EnrollData, EnrollErrors, EnrollResponses, GetAgentCredentialsData, GetAgentCredentialsErrors, GetAgentCredentialsResponses, GetInfoData, GetInfoErrors, GetInfoResponses, GetMeData, GetMeErrors, GetMeResponses, GetStateData, GetStateErrors, GetStateResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcLoginData, OidcLoginErrors, OidcLoginResponses, RemoveMembershipData, RemoveMembershipErrors, RemoveMembershipResponses, RevokeAgentData, RevokeAgentErrors, RevokeAgentResponses, RevokeEnrollmentKeyData, RevokeEnrollmentKeyErrors, RevokeEnrollmentKeyResponses, RevokeGrantData, RevokeGrantErrors, RevokeGrantResponses, RotateUserTokenData, RotateUserTokenErrors, RotateUserTokenResponses, SetMembershipData, SetMembershipErrors, SetMembershipResponses, UpdateAgentConfigData, UpdateAgentConfigErrors, UpdateAgentConfigResponses } from './types.gen';
+import type { AuthorizeServiceData, AuthorizeServiceErrors, AuthorizeServiceResponses, CreateAdminEnrollmentKeyData, CreateAdminEnrollmentKeyErrors, CreateAdminEnrollmentKeyResponses, CreateAdminGrantData, CreateAdminGrantErrors, CreateAdminGrantResponses, CreateAdminRouteData, CreateAdminRouteErrors, CreateAdminRouteResponses, CreateAdminUserData, CreateAdminUserErrors, CreateAdminUserResponses, CreateAdminUserTokenData, CreateAdminUserTokenErrors, CreateAdminUserTokenResponses, CreateAdminWorkspaceData, CreateAdminWorkspaceErrors, CreateAdminWorkspaceResponses, CreateCurrentUserTokenData, CreateCurrentUserTokenErrors, CreateCurrentUserTokenResponses, CreateSessionData, CreateSessionErrors, CreateSessionResponses, CreateWorkspaceEnrollmentKeyData, CreateWorkspaceEnrollmentKeyErrors, CreateWorkspaceEnrollmentKeyResponses, CreateWorkspaceGrantData, CreateWorkspaceGrantErrors, CreateWorkspaceGrantResponses, CreateWorkspaceRouteData, CreateWorkspaceRouteErrors, CreateWorkspaceRouteResponses, DeleteAdminMembershipData, DeleteAdminMembershipErrors, DeleteAdminMembershipResponses, DeleteCurrentSessionData, DeleteCurrentSessionErrors, DeleteCurrentSessionResponses, DeleteMembershipData, DeleteMembershipErrors, DeleteMembershipResponses, EnrollData, EnrollErrors, EnrollResponses, GetAdminAgentData, GetAdminAgentErrors, GetAdminAgentResponses, GetAdminAuditEventData, GetAdminAuditEventErrors, GetAdminAuditEventResponses, GetAdminConnectionData, GetAdminConnectionErrors, GetAdminConnectionResponses, GetAdminEgressData, GetAdminEgressErrors, GetAdminEgressResponses, GetAdminEnrollmentKeyData, GetAdminEnrollmentKeyErrors, GetAdminEnrollmentKeyResponses, GetAdminFlowData, GetAdminFlowErrors, GetAdminFlowResponses, GetAdminGrantData, GetAdminGrantErrors, GetAdminGrantResponses, GetAdminIngressData, GetAdminIngressErrors, GetAdminIngressResponses, GetAdminMembershipData, GetAdminMembershipErrors, GetAdminMembershipResponses, GetAdminRouteData, GetAdminRouteErrors, GetAdminRouteResponses, GetAdminServerData, GetAdminServerErrors, GetAdminServerResponses, GetAdminUserData, GetAdminUserErrors, GetAdminUserResponses, GetAdminWorkspaceData, GetAdminWorkspaceErrors, GetAdminWorkspaceResponses, GetAgentCredentialsData, GetAgentCredentialsErrors, GetAgentCredentialsResponses, GetCurrentSessionData, GetCurrentSessionErrors, GetCurrentSessionResponses, GetCurrentUserData, GetCurrentUserErrors, GetCurrentUserResponses, GetInstanceData, GetInstanceErrors, GetInstanceResponses, GetInstanceStatusData, GetInstanceStatusErrors, GetInstanceStatusResponses, GetMembershipData, GetMembershipErrors, GetMembershipResponses, GetWorkspaceAgentData, GetWorkspaceAgentErrors, GetWorkspaceAgentResponses, GetWorkspaceConnectionData, GetWorkspaceConnectionErrors, GetWorkspaceConnectionResponses, GetWorkspaceData, GetWorkspaceEgressData, GetWorkspaceEgressErrors, GetWorkspaceEgressResponses, GetWorkspaceEnrollmentKeyData, GetWorkspaceEnrollmentKeyErrors, GetWorkspaceEnrollmentKeyResponses, GetWorkspaceErrors, GetWorkspaceFlowData, GetWorkspaceFlowErrors, GetWorkspaceFlowResponses, GetWorkspaceGrantData, GetWorkspaceGrantErrors, GetWorkspaceGrantResponses, GetWorkspaceIngressData, GetWorkspaceIngressErrors, GetWorkspaceIngressResponses, GetWorkspaceResponses, GetWorkspaceRouteData, GetWorkspaceRouteErrors, GetWorkspaceRouteResponses, GetWorkspaceServerData, GetWorkspaceServerErrors, GetWorkspaceServerResponses, GetWorkspaceUserData, GetWorkspaceUserErrors, GetWorkspaceUserResponses, ListAdminAgentsData, ListAdminAgentsErrors, ListAdminAgentsResponses, ListAdminAuditEventsData, ListAdminAuditEventsErrors, ListAdminAuditEventsResponses, ListAdminConnectionsData, ListAdminConnectionsErrors, ListAdminConnectionsResponses, ListAdminEgressesData, ListAdminEgressesErrors, ListAdminEgressesResponses, ListAdminEnrollmentKeysData, ListAdminEnrollmentKeysErrors, ListAdminEnrollmentKeysResponses, ListAdminFlowsData, ListAdminFlowsErrors, ListAdminFlowsResponses, ListAdminGrantsData, ListAdminGrantsErrors, ListAdminGrantsResponses, ListAdminIngressesData, ListAdminIngressesErrors, ListAdminIngressesResponses, ListAdminMembershipsData, ListAdminMembershipsErrors, ListAdminMembershipsResponses, ListAdminRoutesData, ListAdminRoutesErrors, ListAdminRoutesResponses, ListAdminServersData, ListAdminServersErrors, ListAdminServersResponses, ListAdminUsersData, ListAdminUsersErrors, ListAdminUsersResponses, ListAdminWorkspacesData, ListAdminWorkspacesErrors, ListAdminWorkspacesResponses, ListWorkspaceAgentsData, ListWorkspaceAgentsErrors, ListWorkspaceAgentsResponses, ListWorkspaceConnectionsData, ListWorkspaceConnectionsErrors, ListWorkspaceConnectionsResponses, ListWorkspaceEgressesData, ListWorkspaceEgressesErrors, ListWorkspaceEgressesResponses, ListWorkspaceEnrollmentKeysData, ListWorkspaceEnrollmentKeysErrors, ListWorkspaceEnrollmentKeysResponses, ListWorkspaceFlowsData, ListWorkspaceFlowsErrors, ListWorkspaceFlowsResponses, ListWorkspaceGrantsData, ListWorkspaceGrantsErrors, ListWorkspaceGrantsResponses, ListWorkspaceIngressesData, ListWorkspaceIngressesErrors, ListWorkspaceIngressesResponses, ListWorkspaceMembershipsData, ListWorkspaceMembershipsErrors, ListWorkspaceMembershipsResponses, ListWorkspaceRoutesData, ListWorkspaceRoutesErrors, ListWorkspaceRoutesResponses, ListWorkspacesData, ListWorkspacesErrors, ListWorkspaceServersData, ListWorkspaceServersErrors, ListWorkspaceServersResponses, ListWorkspacesResponses, ListWorkspaceUsersData, ListWorkspaceUsersErrors, ListWorkspaceUsersResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcLoginData, OidcLoginErrors, OidcLoginResponses, PutAdminAgentApprovalData, PutAdminAgentApprovalErrors, PutAdminAgentApprovalResponses, PutAdminMembershipData, PutAdminMembershipErrors, PutAdminMembershipResponses, PutMembershipData, PutMembershipErrors, PutMembershipResponses, PutWorkspaceAgentApprovalData, PutWorkspaceAgentApprovalErrors, PutWorkspaceAgentApprovalResponses, UpdateAdminAgentData, UpdateAdminAgentErrors, UpdateAdminAgentResponses, UpdateAdminEnrollmentKeyData, UpdateAdminEnrollmentKeyErrors, UpdateAdminEnrollmentKeyResponses, UpdateAdminGrantData, UpdateAdminGrantErrors, UpdateAdminGrantResponses, UpdateAdminRouteData, UpdateAdminRouteErrors, UpdateAdminRouteResponses, UpdateAdminServerData, UpdateAdminServerErrors, UpdateAdminServerResponses, UpdateAdminUserData, UpdateAdminUserErrors, UpdateAdminUserResponses, UpdateAgentConfigData, UpdateAgentConfigErrors, UpdateAgentConfigResponses, UpdateWorkspaceAgentData, UpdateWorkspaceAgentErrors, UpdateWorkspaceAgentResponses, UpdateWorkspaceEnrollmentKeyData, UpdateWorkspaceEnrollmentKeyErrors, UpdateWorkspaceEnrollmentKeyResponses, UpdateWorkspaceGrantData, UpdateWorkspaceGrantErrors, UpdateWorkspaceGrantResponses, UpdateWorkspaceRouteData, UpdateWorkspaceRouteErrors, UpdateWorkspaceRouteResponses, UpdateWorkspaceServerData, UpdateWorkspaceServerErrors, UpdateWorkspaceServerResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -17,47 +17,6 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
      */
     meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
-
-export const getInfo = <ThrowOnError extends boolean = false>(options?: Options<GetInfoData, ThrowOnError>): RequestResult<GetInfoResponses, GetInfoErrors, ThrowOnError> => (options?.client ?? client).get<GetInfoResponses, GetInfoErrors, ThrowOnError>({ url: '/api/v1/info', ...options });
-
-export const login = <ThrowOnError extends boolean = false>(options: Options<LoginData, ThrowOnError>): RequestResult<LoginResponses, LoginErrors, ThrowOnError> => (options.client ?? client).post<LoginResponses, LoginErrors, ThrowOnError>({
-    url: '/api/v1/login',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const logout = <ThrowOnError extends boolean = false>(options?: Options<LogoutData, ThrowOnError>): RequestResult<LogoutResponses, LogoutErrors, ThrowOnError> => (options?.client ?? client).post<LogoutResponses, LogoutErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/logout',
-    ...options
-});
-
-export const getMe = <ThrowOnError extends boolean = false>(options?: Options<GetMeData, ThrowOnError>): RequestResult<GetMeResponses, GetMeErrors, ThrowOnError> => (options?.client ?? client).get<GetMeResponses, GetMeErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/me',
-    ...options
-});
-
-export const getState = <ThrowOnError extends boolean = false>(options?: Options<GetStateData, ThrowOnError>): RequestResult<GetStateResponses, GetStateErrors, ThrowOnError> => (options?.client ?? client).get<GetStateResponses, GetStateErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/state',
-    ...options
-});
 
 export const enroll = <ThrowOnError extends boolean = false>(options: Options<EnrollData, ThrowOnError>): RequestResult<EnrollResponses, EnrollErrors, ThrowOnError> => (options.client ?? client).post<EnrollResponses, EnrollErrors, ThrowOnError>({
     url: '/api/v1/enroll',
@@ -92,200 +51,6 @@ export const updateAgentConfig = <ThrowOnError extends boolean = false>(options:
     }
 });
 
-export const createUser = <ThrowOnError extends boolean = false>(options: Options<CreateUserData, ThrowOnError>): RequestResult<CreateUserResponses, CreateUserErrors, ThrowOnError> => (options.client ?? client).post<CreateUserResponses, CreateUserErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/users',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const disableUser = <ThrowOnError extends boolean = false>(options: Options<DisableUserData, ThrowOnError>): RequestResult<DisableUserResponses, DisableUserErrors, ThrowOnError> => (options.client ?? client).delete<DisableUserResponses, DisableUserErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/users/{id}',
-    ...options
-});
-
-export const rotateUserToken = <ThrowOnError extends boolean = false>(options: Options<RotateUserTokenData, ThrowOnError>): RequestResult<RotateUserTokenResponses, RotateUserTokenErrors, ThrowOnError> => (options.client ?? client).post<RotateUserTokenResponses, RotateUserTokenErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/users/{id}/token',
-    ...options
-});
-
-export const createWorkspace = <ThrowOnError extends boolean = false>(options: Options<CreateWorkspaceData, ThrowOnError>): RequestResult<CreateWorkspaceResponses, CreateWorkspaceErrors, ThrowOnError> => (options.client ?? client).post<CreateWorkspaceResponses, CreateWorkspaceErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/workspaces',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const setMembership = <ThrowOnError extends boolean = false>(options: Options<SetMembershipData, ThrowOnError>): RequestResult<SetMembershipResponses, SetMembershipErrors, ThrowOnError> => (options.client ?? client).post<SetMembershipResponses, SetMembershipErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/memberships',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const removeMembership = <ThrowOnError extends boolean = false>(options: Options<RemoveMembershipData, ThrowOnError>): RequestResult<RemoveMembershipResponses, RemoveMembershipErrors, ThrowOnError> => (options.client ?? client).delete<RemoveMembershipResponses, RemoveMembershipErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/memberships/{workspace}/{user}',
-    ...options
-});
-
-export const createEnrollmentKey = <ThrowOnError extends boolean = false>(options: Options<CreateEnrollmentKeyData, ThrowOnError>): RequestResult<CreateEnrollmentKeyResponses, CreateEnrollmentKeyErrors, ThrowOnError> => (options.client ?? client).post<CreateEnrollmentKeyResponses, CreateEnrollmentKeyErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/enrollment-keys',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const revokeEnrollmentKey = <ThrowOnError extends boolean = false>(options: Options<RevokeEnrollmentKeyData, ThrowOnError>): RequestResult<RevokeEnrollmentKeyResponses, RevokeEnrollmentKeyErrors, ThrowOnError> => (options.client ?? client).delete<RevokeEnrollmentKeyResponses, RevokeEnrollmentKeyErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/enrollment-keys/{id}',
-    ...options
-});
-
-export const approveAgent = <ThrowOnError extends boolean = false>(options: Options<ApproveAgentData, ThrowOnError>): RequestResult<ApproveAgentResponses, ApproveAgentErrors, ThrowOnError> => (options.client ?? client).post<ApproveAgentResponses, ApproveAgentErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/agents/{id}/approve',
-    ...options
-});
-
-export const revokeAgent = <ThrowOnError extends boolean = false>(options: Options<RevokeAgentData, ThrowOnError>): RequestResult<RevokeAgentResponses, RevokeAgentErrors, ThrowOnError> => (options.client ?? client).post<RevokeAgentResponses, RevokeAgentErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/agents/{id}/revoke',
-    ...options
-});
-
-export const createEgressRoute = <ThrowOnError extends boolean = false>(options: Options<CreateEgressRouteData, ThrowOnError>): RequestResult<CreateEgressRouteResponses, CreateEgressRouteErrors, ThrowOnError> => (options.client ?? client).post<CreateEgressRouteResponses, CreateEgressRouteErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/egress-routes',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const disableEgressRoute = <ThrowOnError extends boolean = false>(options: Options<DisableEgressRouteData, ThrowOnError>): RequestResult<DisableEgressRouteResponses, DisableEgressRouteErrors, ThrowOnError> => (options.client ?? client).delete<DisableEgressRouteResponses, DisableEgressRouteErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/egress-routes/{id}',
-    ...options
-});
-
-export const enableEgressRoute = <ThrowOnError extends boolean = false>(options: Options<EnableEgressRouteData, ThrowOnError>): RequestResult<EnableEgressRouteResponses, EnableEgressRouteErrors, ThrowOnError> => (options.client ?? client).post<EnableEgressRouteResponses, EnableEgressRouteErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/egress-routes/{id}/enable',
-    ...options
-});
-
-export const disableService = <ThrowOnError extends boolean = false>(options: Options<DisableServiceData, ThrowOnError>): RequestResult<DisableServiceResponses, DisableServiceErrors, ThrowOnError> => (options.client ?? client).delete<DisableServiceResponses, DisableServiceErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/services/{id}',
-    ...options
-});
-
-export const enableService = <ThrowOnError extends boolean = false>(options: Options<EnableServiceData, ThrowOnError>): RequestResult<EnableServiceResponses, EnableServiceErrors, ThrowOnError> => (options.client ?? client).post<EnableServiceResponses, EnableServiceErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/services/{id}/enable',
-    ...options
-});
-
-export const createGrant = <ThrowOnError extends boolean = false>(options: Options<CreateGrantData, ThrowOnError>): RequestResult<CreateGrantResponses, CreateGrantErrors, ThrowOnError> => (options.client ?? client).post<CreateGrantResponses, CreateGrantErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/grants',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const revokeGrant = <ThrowOnError extends boolean = false>(options: Options<RevokeGrantData, ThrowOnError>): RequestResult<RevokeGrantResponses, RevokeGrantErrors, ThrowOnError> => (options.client ?? client).delete<RevokeGrantResponses, RevokeGrantErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: '__Host-agents-session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/grants/{id}',
-    ...options
-});
-
 /**
  * Browser navigation endpoint, not an AJAX API. OIDC uses state, nonce and PKCE.
  */
@@ -300,3 +65,1048 @@ export const oidcCallback = <ThrowOnError extends boolean = false>(options: Opti
  * Browser navigation endpoint, not an AJAX API. OIDC uses state, nonce and PKCE.
  */
 export const authorizeService = <ThrowOnError extends boolean = false>(options: Options<AuthorizeServiceData, ThrowOnError>): RequestResult<AuthorizeServiceResponses, AuthorizeServiceErrors, ThrowOnError> => (options.client ?? client).get<AuthorizeServiceResponses, AuthorizeServiceErrors, ThrowOnError>({ url: '/auth/authorize', ...options });
+
+export const getInstance = <ThrowOnError extends boolean = false>(options?: Options<GetInstanceData, ThrowOnError>): RequestResult<GetInstanceResponses, GetInstanceErrors, ThrowOnError> => (options?.client ?? client).get<GetInstanceResponses, GetInstanceErrors, ThrowOnError>({ url: '/v1/instance', ...options });
+
+export const getInstanceStatus = <ThrowOnError extends boolean = false>(options?: Options<GetInstanceStatusData, ThrowOnError>): RequestResult<GetInstanceStatusResponses, GetInstanceStatusErrors, ThrowOnError> => (options?.client ?? client).get<GetInstanceStatusResponses, GetInstanceStatusErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/instance/status',
+    ...options
+});
+
+export const createSession = <ThrowOnError extends boolean = false>(options: Options<CreateSessionData, ThrowOnError>): RequestResult<CreateSessionResponses, CreateSessionErrors, ThrowOnError> => (options.client ?? client).post<CreateSessionResponses, CreateSessionErrors, ThrowOnError>({
+    url: '/v1/sessions',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const deleteCurrentSession = <ThrowOnError extends boolean = false>(options?: Options<DeleteCurrentSessionData, ThrowOnError>): RequestResult<DeleteCurrentSessionResponses, DeleteCurrentSessionErrors, ThrowOnError> => (options?.client ?? client).delete<DeleteCurrentSessionResponses, DeleteCurrentSessionErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }],
+    url: '/v1/sessions/current',
+    ...options
+});
+
+export const getCurrentSession = <ThrowOnError extends boolean = false>(options?: Options<GetCurrentSessionData, ThrowOnError>): RequestResult<GetCurrentSessionResponses, GetCurrentSessionErrors, ThrowOnError> => (options?.client ?? client).get<GetCurrentSessionResponses, GetCurrentSessionErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }],
+    url: '/v1/sessions/current',
+    ...options
+});
+
+export const getCurrentUser = <ThrowOnError extends boolean = false>(options?: Options<GetCurrentUserData, ThrowOnError>): RequestResult<GetCurrentUserResponses, GetCurrentUserErrors, ThrowOnError> => (options?.client ?? client).get<GetCurrentUserResponses, GetCurrentUserErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/users/me',
+    ...options
+});
+
+export const createCurrentUserToken = <ThrowOnError extends boolean = false>(options?: Options<CreateCurrentUserTokenData, ThrowOnError>): RequestResult<CreateCurrentUserTokenResponses, CreateCurrentUserTokenErrors, ThrowOnError> => (options?.client ?? client).post<CreateCurrentUserTokenResponses, CreateCurrentUserTokenErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/users/me/tokens',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminUsers = <ThrowOnError extends boolean = false>(options?: Options<ListAdminUsersData, ThrowOnError>): RequestResult<ListAdminUsersResponses, ListAdminUsersErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminUsersResponses, ListAdminUsersErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/users',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const createAdminUser = <ThrowOnError extends boolean = false>(options: Options<CreateAdminUserData, ThrowOnError>): RequestResult<CreateAdminUserResponses, CreateAdminUserErrors, ThrowOnError> => (options.client ?? client).post<CreateAdminUserResponses, CreateAdminUserErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/users',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminUser = <ThrowOnError extends boolean = false>(options: Options<GetAdminUserData, ThrowOnError>): RequestResult<GetAdminUserResponses, GetAdminUserErrors, ThrowOnError> => (options.client ?? client).get<GetAdminUserResponses, GetAdminUserErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/users/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const updateAdminUser = <ThrowOnError extends boolean = false>(options: Options<UpdateAdminUserData, ThrowOnError>): RequestResult<UpdateAdminUserResponses, UpdateAdminUserErrors, ThrowOnError> => (options.client ?? client).patch<UpdateAdminUserResponses, UpdateAdminUserErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/users/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const createAdminUserToken = <ThrowOnError extends boolean = false>(options: Options<CreateAdminUserTokenData, ThrowOnError>): RequestResult<CreateAdminUserTokenResponses, CreateAdminUserTokenErrors, ThrowOnError> => (options.client ?? client).post<CreateAdminUserTokenResponses, CreateAdminUserTokenErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/users/{id}/tokens',
+    ...options
+});
+
+export const listWorkspaces = <ThrowOnError extends boolean = false>(options?: Options<ListWorkspacesData, ThrowOnError>): RequestResult<ListWorkspacesResponses, ListWorkspacesErrors, ThrowOnError> => (options?.client ?? client).get<ListWorkspacesResponses, ListWorkspacesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminWorkspaces = <ThrowOnError extends boolean = false>(options?: Options<ListAdminWorkspacesData, ThrowOnError>): RequestResult<ListAdminWorkspacesResponses, ListAdminWorkspacesErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminWorkspacesResponses, ListAdminWorkspacesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/workspaces',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const createAdminWorkspace = <ThrowOnError extends boolean = false>(options: Options<CreateAdminWorkspaceData, ThrowOnError>): RequestResult<CreateAdminWorkspaceResponses, CreateAdminWorkspaceErrors, ThrowOnError> => (options.client ?? client).post<CreateAdminWorkspaceResponses, CreateAdminWorkspaceErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/workspaces',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminWorkspace = <ThrowOnError extends boolean = false>(options: Options<GetAdminWorkspaceData, ThrowOnError>): RequestResult<GetAdminWorkspaceResponses, GetAdminWorkspaceErrors, ThrowOnError> => (options.client ?? client).get<GetAdminWorkspaceResponses, GetAdminWorkspaceErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/workspaces/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminMemberships = <ThrowOnError extends boolean = false>(options?: Options<ListAdminMembershipsData, ThrowOnError>): RequestResult<ListAdminMembershipsResponses, ListAdminMembershipsErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminMembershipsResponses, ListAdminMembershipsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/memberships',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminAgents = <ThrowOnError extends boolean = false>(options?: Options<ListAdminAgentsData, ThrowOnError>): RequestResult<ListAdminAgentsResponses, ListAdminAgentsErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminAgentsResponses, ListAdminAgentsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/agents',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminAgent = <ThrowOnError extends boolean = false>(options: Options<GetAdminAgentData, ThrowOnError>): RequestResult<GetAdminAgentResponses, GetAdminAgentErrors, ThrowOnError> => (options.client ?? client).get<GetAdminAgentResponses, GetAdminAgentErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/agents/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const updateAdminAgent = <ThrowOnError extends boolean = false>(options: Options<UpdateAdminAgentData, ThrowOnError>): RequestResult<UpdateAdminAgentResponses, UpdateAdminAgentErrors, ThrowOnError> => (options.client ?? client).patch<UpdateAdminAgentResponses, UpdateAdminAgentErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/agents/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const putAdminAgentApproval = <ThrowOnError extends boolean = false>(options: Options<PutAdminAgentApprovalData, ThrowOnError>): RequestResult<PutAdminAgentApprovalResponses, PutAdminAgentApprovalErrors, ThrowOnError> => (options.client ?? client).put<PutAdminAgentApprovalResponses, PutAdminAgentApprovalErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/agents/{id}/approval',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminEnrollmentKeys = <ThrowOnError extends boolean = false>(options?: Options<ListAdminEnrollmentKeysData, ThrowOnError>): RequestResult<ListAdminEnrollmentKeysResponses, ListAdminEnrollmentKeysErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminEnrollmentKeysResponses, ListAdminEnrollmentKeysErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/enrollment-keys',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const createAdminEnrollmentKey = <ThrowOnError extends boolean = false>(options: Options<CreateAdminEnrollmentKeyData, ThrowOnError>): RequestResult<CreateAdminEnrollmentKeyResponses, CreateAdminEnrollmentKeyErrors, ThrowOnError> => (options.client ?? client).post<CreateAdminEnrollmentKeyResponses, CreateAdminEnrollmentKeyErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/enrollment-keys',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminEnrollmentKey = <ThrowOnError extends boolean = false>(options: Options<GetAdminEnrollmentKeyData, ThrowOnError>): RequestResult<GetAdminEnrollmentKeyResponses, GetAdminEnrollmentKeyErrors, ThrowOnError> => (options.client ?? client).get<GetAdminEnrollmentKeyResponses, GetAdminEnrollmentKeyErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/enrollment-keys/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const updateAdminEnrollmentKey = <ThrowOnError extends boolean = false>(options: Options<UpdateAdminEnrollmentKeyData, ThrowOnError>): RequestResult<UpdateAdminEnrollmentKeyResponses, UpdateAdminEnrollmentKeyErrors, ThrowOnError> => (options.client ?? client).patch<UpdateAdminEnrollmentKeyResponses, UpdateAdminEnrollmentKeyErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/enrollment-keys/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminGrants = <ThrowOnError extends boolean = false>(options?: Options<ListAdminGrantsData, ThrowOnError>): RequestResult<ListAdminGrantsResponses, ListAdminGrantsErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminGrantsResponses, ListAdminGrantsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/grants',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const createAdminGrant = <ThrowOnError extends boolean = false>(options: Options<CreateAdminGrantData, ThrowOnError>): RequestResult<CreateAdminGrantResponses, CreateAdminGrantErrors, ThrowOnError> => (options.client ?? client).post<CreateAdminGrantResponses, CreateAdminGrantErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/grants',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminGrant = <ThrowOnError extends boolean = false>(options: Options<GetAdminGrantData, ThrowOnError>): RequestResult<GetAdminGrantResponses, GetAdminGrantErrors, ThrowOnError> => (options.client ?? client).get<GetAdminGrantResponses, GetAdminGrantErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/grants/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const updateAdminGrant = <ThrowOnError extends boolean = false>(options: Options<UpdateAdminGrantData, ThrowOnError>): RequestResult<UpdateAdminGrantResponses, UpdateAdminGrantErrors, ThrowOnError> => (options.client ?? client).patch<UpdateAdminGrantResponses, UpdateAdminGrantErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/grants/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminConnections = <ThrowOnError extends boolean = false>(options?: Options<ListAdminConnectionsData, ThrowOnError>): RequestResult<ListAdminConnectionsResponses, ListAdminConnectionsErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminConnectionsResponses, ListAdminConnectionsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/connections',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminConnection = <ThrowOnError extends boolean = false>(options: Options<GetAdminConnectionData, ThrowOnError>): RequestResult<GetAdminConnectionResponses, GetAdminConnectionErrors, ThrowOnError> => (options.client ?? client).get<GetAdminConnectionResponses, GetAdminConnectionErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/connections/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminFlows = <ThrowOnError extends boolean = false>(options?: Options<ListAdminFlowsData, ThrowOnError>): RequestResult<ListAdminFlowsResponses, ListAdminFlowsErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminFlowsResponses, ListAdminFlowsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/flows',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminFlow = <ThrowOnError extends boolean = false>(options: Options<GetAdminFlowData, ThrowOnError>): RequestResult<GetAdminFlowResponses, GetAdminFlowErrors, ThrowOnError> => (options.client ?? client).get<GetAdminFlowResponses, GetAdminFlowErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/flows/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminAuditEvents = <ThrowOnError extends boolean = false>(options?: Options<ListAdminAuditEventsData, ThrowOnError>): RequestResult<ListAdminAuditEventsResponses, ListAdminAuditEventsErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminAuditEventsResponses, ListAdminAuditEventsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/audit-events',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminAuditEvent = <ThrowOnError extends boolean = false>(options: Options<GetAdminAuditEventData, ThrowOnError>): RequestResult<GetAdminAuditEventResponses, GetAdminAuditEventErrors, ThrowOnError> => (options.client ?? client).get<GetAdminAuditEventResponses, GetAdminAuditEventErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/audit-events/{id}',
+    ...options
+});
+
+export const deleteMembership = <ThrowOnError extends boolean = false>(options: Options<DeleteMembershipData, ThrowOnError>): RequestResult<DeleteMembershipResponses, DeleteMembershipErrors, ThrowOnError> => (options.client ?? client).delete<DeleteMembershipResponses, DeleteMembershipErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/memberships/{userId}',
+    ...options
+});
+
+export const getMembership = <ThrowOnError extends boolean = false>(options: Options<GetMembershipData, ThrowOnError>): RequestResult<GetMembershipResponses, GetMembershipErrors, ThrowOnError> => (options.client ?? client).get<GetMembershipResponses, GetMembershipErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/memberships/{userId}',
+    ...options
+});
+
+export const putMembership = <ThrowOnError extends boolean = false>(options: Options<PutMembershipData, ThrowOnError>): RequestResult<PutMembershipResponses, PutMembershipErrors, ThrowOnError> => (options.client ?? client).put<PutMembershipResponses, PutMembershipErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/memberships/{userId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const deleteAdminMembership = <ThrowOnError extends boolean = false>(options: Options<DeleteAdminMembershipData, ThrowOnError>): RequestResult<DeleteAdminMembershipResponses, DeleteAdminMembershipErrors, ThrowOnError> => (options.client ?? client).delete<DeleteAdminMembershipResponses, DeleteAdminMembershipErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/workspaces/{workspaceId}/memberships/{userId}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminMembership = <ThrowOnError extends boolean = false>(options: Options<GetAdminMembershipData, ThrowOnError>): RequestResult<GetAdminMembershipResponses, GetAdminMembershipErrors, ThrowOnError> => (options.client ?? client).get<GetAdminMembershipResponses, GetAdminMembershipErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/workspaces/{workspaceId}/memberships/{userId}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const putAdminMembership = <ThrowOnError extends boolean = false>(options: Options<PutAdminMembershipData, ThrowOnError>): RequestResult<PutAdminMembershipResponses, PutAdminMembershipErrors, ThrowOnError> => (options.client ?? client).put<PutAdminMembershipResponses, PutAdminMembershipErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/workspaces/{workspaceId}/memberships/{userId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const listWorkspaceAgents = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceAgentsData, ThrowOnError>): RequestResult<ListWorkspaceAgentsResponses, ListWorkspaceAgentsErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceAgentsResponses, ListWorkspaceAgentsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/agents',
+    ...options
+});
+
+export const getWorkspaceAgent = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceAgentData, ThrowOnError>): RequestResult<GetWorkspaceAgentResponses, GetWorkspaceAgentErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceAgentResponses, GetWorkspaceAgentErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/agents/{agentId}',
+    ...options
+});
+
+export const updateWorkspaceAgent = <ThrowOnError extends boolean = false>(options: Options<UpdateWorkspaceAgentData, ThrowOnError>): RequestResult<UpdateWorkspaceAgentResponses, UpdateWorkspaceAgentErrors, ThrowOnError> => (options.client ?? client).patch<UpdateWorkspaceAgentResponses, UpdateWorkspaceAgentErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/agents/{agentId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const listWorkspaceMemberships = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceMembershipsData, ThrowOnError>): RequestResult<ListWorkspaceMembershipsResponses, ListWorkspaceMembershipsErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceMembershipsResponses, ListWorkspaceMembershipsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/memberships',
+    ...options
+});
+
+export const listWorkspaceEnrollmentKeys = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceEnrollmentKeysData, ThrowOnError>): RequestResult<ListWorkspaceEnrollmentKeysResponses, ListWorkspaceEnrollmentKeysErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceEnrollmentKeysResponses, ListWorkspaceEnrollmentKeysErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/enrollment-keys',
+    ...options
+});
+
+export const createWorkspaceEnrollmentKey = <ThrowOnError extends boolean = false>(options: Options<CreateWorkspaceEnrollmentKeyData, ThrowOnError>): RequestResult<CreateWorkspaceEnrollmentKeyResponses, CreateWorkspaceEnrollmentKeyErrors, ThrowOnError> => (options.client ?? client).post<CreateWorkspaceEnrollmentKeyResponses, CreateWorkspaceEnrollmentKeyErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/enrollment-keys',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getWorkspaceEnrollmentKey = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceEnrollmentKeyData, ThrowOnError>): RequestResult<GetWorkspaceEnrollmentKeyResponses, GetWorkspaceEnrollmentKeyErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceEnrollmentKeyResponses, GetWorkspaceEnrollmentKeyErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/enrollment-keys/{keyId}',
+    ...options
+});
+
+export const updateWorkspaceEnrollmentKey = <ThrowOnError extends boolean = false>(options: Options<UpdateWorkspaceEnrollmentKeyData, ThrowOnError>): RequestResult<UpdateWorkspaceEnrollmentKeyResponses, UpdateWorkspaceEnrollmentKeyErrors, ThrowOnError> => (options.client ?? client).patch<UpdateWorkspaceEnrollmentKeyResponses, UpdateWorkspaceEnrollmentKeyErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/enrollment-keys/{keyId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const listWorkspaceGrants = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceGrantsData, ThrowOnError>): RequestResult<ListWorkspaceGrantsResponses, ListWorkspaceGrantsErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceGrantsResponses, ListWorkspaceGrantsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/grants',
+    ...options
+});
+
+export const createWorkspaceGrant = <ThrowOnError extends boolean = false>(options: Options<CreateWorkspaceGrantData, ThrowOnError>): RequestResult<CreateWorkspaceGrantResponses, CreateWorkspaceGrantErrors, ThrowOnError> => (options.client ?? client).post<CreateWorkspaceGrantResponses, CreateWorkspaceGrantErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/grants',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getWorkspaceGrant = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceGrantData, ThrowOnError>): RequestResult<GetWorkspaceGrantResponses, GetWorkspaceGrantErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceGrantResponses, GetWorkspaceGrantErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/grants/{grantId}',
+    ...options
+});
+
+export const updateWorkspaceGrant = <ThrowOnError extends boolean = false>(options: Options<UpdateWorkspaceGrantData, ThrowOnError>): RequestResult<UpdateWorkspaceGrantResponses, UpdateWorkspaceGrantErrors, ThrowOnError> => (options.client ?? client).patch<UpdateWorkspaceGrantResponses, UpdateWorkspaceGrantErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/grants/{grantId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const listWorkspaceConnections = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceConnectionsData, ThrowOnError>): RequestResult<ListWorkspaceConnectionsResponses, ListWorkspaceConnectionsErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceConnectionsResponses, ListWorkspaceConnectionsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/connections',
+    ...options
+});
+
+export const getWorkspaceConnection = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceConnectionData, ThrowOnError>): RequestResult<GetWorkspaceConnectionResponses, GetWorkspaceConnectionErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceConnectionResponses, GetWorkspaceConnectionErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/connections/{connectionId}',
+    ...options
+});
+
+export const listWorkspaceFlows = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceFlowsData, ThrowOnError>): RequestResult<ListWorkspaceFlowsResponses, ListWorkspaceFlowsErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceFlowsResponses, ListWorkspaceFlowsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/flows',
+    ...options
+});
+
+export const getWorkspaceFlow = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceFlowData, ThrowOnError>): RequestResult<GetWorkspaceFlowResponses, GetWorkspaceFlowErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceFlowResponses, GetWorkspaceFlowErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/flows/{flowId}',
+    ...options
+});
+
+export const putWorkspaceAgentApproval = <ThrowOnError extends boolean = false>(options: Options<PutWorkspaceAgentApprovalData, ThrowOnError>): RequestResult<PutWorkspaceAgentApprovalResponses, PutWorkspaceAgentApprovalErrors, ThrowOnError> => (options.client ?? client).put<PutWorkspaceAgentApprovalResponses, PutWorkspaceAgentApprovalErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/agents/{agentId}/approval',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const listWorkspaceIngresses = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceIngressesData, ThrowOnError>): RequestResult<ListWorkspaceIngressesResponses, ListWorkspaceIngressesErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceIngressesResponses, ListWorkspaceIngressesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/ingresses',
+    ...options
+});
+
+export const listWorkspaceServers = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceServersData, ThrowOnError>): RequestResult<ListWorkspaceServersResponses, ListWorkspaceServersErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceServersResponses, ListWorkspaceServersErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/servers',
+    ...options
+});
+
+export const listWorkspaceEgresses = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceEgressesData, ThrowOnError>): RequestResult<ListWorkspaceEgressesResponses, ListWorkspaceEgressesErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceEgressesResponses, ListWorkspaceEgressesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/egresses',
+    ...options
+});
+
+export const listWorkspaceRoutes = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceRoutesData, ThrowOnError>): RequestResult<ListWorkspaceRoutesResponses, ListWorkspaceRoutesErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceRoutesResponses, ListWorkspaceRoutesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/routes',
+    ...options
+});
+
+/**
+ * Create an egress route in this workspace; serve routes are derived from approved Agent configuration.
+ */
+export const createWorkspaceRoute = <ThrowOnError extends boolean = false>(options: Options<CreateWorkspaceRouteData, ThrowOnError>): RequestResult<CreateWorkspaceRouteResponses, CreateWorkspaceRouteErrors, ThrowOnError> => (options.client ?? client).post<CreateWorkspaceRouteResponses, CreateWorkspaceRouteErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/routes',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getWorkspaceServer = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceServerData, ThrowOnError>): RequestResult<GetWorkspaceServerResponses, GetWorkspaceServerErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceServerResponses, GetWorkspaceServerErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/servers/{serviceId}',
+    ...options
+});
+
+export const updateWorkspaceServer = <ThrowOnError extends boolean = false>(options: Options<UpdateWorkspaceServerData, ThrowOnError>): RequestResult<UpdateWorkspaceServerResponses, UpdateWorkspaceServerErrors, ThrowOnError> => (options.client ?? client).patch<UpdateWorkspaceServerResponses, UpdateWorkspaceServerErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/servers/{serviceId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getWorkspaceRoute = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceRouteData, ThrowOnError>): RequestResult<GetWorkspaceRouteResponses, GetWorkspaceRouteErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceRouteResponses, GetWorkspaceRouteErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/routes/{routeId}',
+    ...options
+});
+
+export const updateWorkspaceRoute = <ThrowOnError extends boolean = false>(options: Options<UpdateWorkspaceRouteData, ThrowOnError>): RequestResult<UpdateWorkspaceRouteResponses, UpdateWorkspaceRouteErrors, ThrowOnError> => (options.client ?? client).patch<UpdateWorkspaceRouteResponses, UpdateWorkspaceRouteErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/routes/{routeId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getWorkspace = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceData, ThrowOnError>): RequestResult<GetWorkspaceResponses, GetWorkspaceErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceResponses, GetWorkspaceErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminServers = <ThrowOnError extends boolean = false>(options?: Options<ListAdminServersData, ThrowOnError>): RequestResult<ListAdminServersResponses, ListAdminServersErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminServersResponses, ListAdminServersErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/servers',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminServer = <ThrowOnError extends boolean = false>(options: Options<GetAdminServerData, ThrowOnError>): RequestResult<GetAdminServerResponses, GetAdminServerErrors, ThrowOnError> => (options.client ?? client).get<GetAdminServerResponses, GetAdminServerErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/servers/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const updateAdminServer = <ThrowOnError extends boolean = false>(options: Options<UpdateAdminServerData, ThrowOnError>): RequestResult<UpdateAdminServerResponses, UpdateAdminServerErrors, ThrowOnError> => (options.client ?? client).patch<UpdateAdminServerResponses, UpdateAdminServerErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/servers/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const listAdminRoutes = <ThrowOnError extends boolean = false>(options?: Options<ListAdminRoutesData, ThrowOnError>): RequestResult<ListAdminRoutesResponses, ListAdminRoutesErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminRoutesResponses, ListAdminRoutesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/routes',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const createAdminRoute = <ThrowOnError extends boolean = false>(options: Options<CreateAdminRouteData, ThrowOnError>): RequestResult<CreateAdminRouteResponses, CreateAdminRouteErrors, ThrowOnError> => (options.client ?? client).post<CreateAdminRouteResponses, CreateAdminRouteErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/routes',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const getAdminRoute = <ThrowOnError extends boolean = false>(options: Options<GetAdminRouteData, ThrowOnError>): RequestResult<GetAdminRouteResponses, GetAdminRouteErrors, ThrowOnError> => (options.client ?? client).get<GetAdminRouteResponses, GetAdminRouteErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/routes/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator; non-administrators receive 403 before resource lookup.
+ */
+export const updateAdminRoute = <ThrowOnError extends boolean = false>(options: Options<UpdateAdminRouteData, ThrowOnError>): RequestResult<UpdateAdminRouteResponses, UpdateAdminRouteErrors, ThrowOnError> => (options.client ?? client).patch<UpdateAdminRouteResponses, UpdateAdminRouteErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/routes/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Visible members of the selected workspace only.
+ */
+export const listWorkspaceUsers = <ThrowOnError extends boolean = false>(options: Options<ListWorkspaceUsersData, ThrowOnError>): RequestResult<ListWorkspaceUsersResponses, ListWorkspaceUsersErrors, ThrowOnError> => (options.client ?? client).get<ListWorkspaceUsersResponses, ListWorkspaceUsersErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/users',
+    ...options
+});
+
+/**
+ * Visible members of the selected workspace only.
+ */
+export const getWorkspaceUser = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceUserData, ThrowOnError>): RequestResult<GetWorkspaceUserResponses, GetWorkspaceUserErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceUserResponses, GetWorkspaceUserErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/users/{userId}',
+    ...options
+});
+
+export const getWorkspaceIngress = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceIngressData, ThrowOnError>): RequestResult<GetWorkspaceIngressResponses, GetWorkspaceIngressErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceIngressResponses, GetWorkspaceIngressErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/ingresses/{agentId}',
+    ...options
+});
+
+export const getWorkspaceEgress = <ThrowOnError extends boolean = false>(options: Options<GetWorkspaceEgressData, ThrowOnError>): RequestResult<GetWorkspaceEgressResponses, GetWorkspaceEgressErrors, ThrowOnError> => (options.client ?? client).get<GetWorkspaceEgressResponses, GetWorkspaceEgressErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/workspaces/{workspaceId}/egresses/{agentId}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator.
+ */
+export const listAdminIngresses = <ThrowOnError extends boolean = false>(options?: Options<ListAdminIngressesData, ThrowOnError>): RequestResult<ListAdminIngressesResponses, ListAdminIngressesErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminIngressesResponses, ListAdminIngressesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/ingresses',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator.
+ */
+export const getAdminIngress = <ThrowOnError extends boolean = false>(options: Options<GetAdminIngressData, ThrowOnError>): RequestResult<GetAdminIngressResponses, GetAdminIngressErrors, ThrowOnError> => (options.client ?? client).get<GetAdminIngressResponses, GetAdminIngressErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/ingresses/{id}',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator.
+ */
+export const listAdminEgresses = <ThrowOnError extends boolean = false>(options?: Options<ListAdminEgressesData, ThrowOnError>): RequestResult<ListAdminEgressesResponses, ListAdminEgressesErrors, ThrowOnError> => (options?.client ?? client).get<ListAdminEgressesResponses, ListAdminEgressesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/egresses',
+    ...options
+});
+
+/**
+ * Requires an active instance administrator.
+ */
+export const getAdminEgress = <ThrowOnError extends boolean = false>(options: Options<GetAdminEgressData, ThrowOnError>): RequestResult<GetAdminEgressResponses, GetAdminEgressErrors, ThrowOnError> => (options.client ?? client).get<GetAdminEgressResponses, GetAdminEgressErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-agents-session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/v1/admin/egresses/{id}',
+    ...options
+});
