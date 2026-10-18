@@ -52,6 +52,7 @@ docker buildx build --ssh default --platform linux/amd64,linux/arm64 --target co
 ## 实现与验证
 
 - [实体、状态机与路由](docs/backend-implementation.md)
+- [User / Service Account 与 Hydra Device Flow 目标设计](docs/identity-and-device-flow.md)（待实现；区分设备资源归属、运行主体与人类批准者）
 - [Edge 授权与租约](edge/README.md)
 - [来源与依赖](THIRD_PARTY_NOTICES.md)
 
@@ -64,5 +65,7 @@ helm lint charts/agents --strict
 Console 使用 React、TypeScript、shadcn/ui。前端 API 类型、客户端和操作函数由 [OpenAPI 契约](api/openapi.json) 生成；修改契约后执行 `make generate`，CI 会检查生成文件与构建产物是否同步。管理 API 按 `/v1/admin/*` 和 `/v1/workspaces/{workspaceId}/*` 区分实例管理与工作空间资源，所有集合支持编号分页和服务端筛选；旧聚合 `/api/v1/state` 已移除。设备控制、OAuth 和 XHTTP 协议保持兼容。
 
 认证支持标准 OIDC discovery、授权码 + PKCE、state/nonce 和 ID token 校验，并按 issuer + subject 绑定用户。新用户获得仅自己为 owner 的 `personal-<userID>` Workspace，已有用户不补建。配置中的 bootstrap 管理员 subject 仅首次创建账户时生效；`oidc.adminEmails` 可按已验证邮箱授予实例管理员，要求 ID token 的 `email_verified` 为布尔值 `true`，移除名单后重启 Control 会撤销邮箱派生的管理员权限。Token 登录保留给自动化与应急管理。
+
+已确认的下一版身份设计增加单 Workspace 的 Service Account 和独立 Hydra：agentd 用 OAuth Device Flow 引导人类用户完成 OIDC、选择 Workspace 和本人/SA 身份，再以限定用途的 access token 换取每设备独立凭据。SA 由 maintainer 及以上管理，不能登录 Console。当前实现仍是 User 绑定设备的旧模型，尚未交付这些新能力；详细流程、API 增量、撤权和迁移要求见上述目标设计。
 
 目前没有真实 CDN 兼容性验收、自动秘密轮换或多 Edge 目录。OIDC 增加显式 v1→v2 数据库迁移，保留现有用户、设备、授权和凭据。Control 启动时需要身份提供方 discovery 可达；浏览器会话不超过 ID token 到期时间及 8 小时，不持久化 IdP tokens。

@@ -2,6 +2,8 @@
 
 本文件描述独立 agents 仓库中的实现。Control、Edge、Console 可分别运行；持久状态与连接目录仍分别由一个 Control 和一个 Edge 拥有。`agents serve` 保留单进程开发模式。长期设计见 agentd 仓库的 `docs/agents-agentd-architecture.md`。
 
+2026-10-18 身份设计修订：目标模型为 Workspace-owned Agent + 唯一 User/ServiceAccount 主体，并引入 Hydra Device Flow。该变更尚未实现；本文件下述 User 绑定、注册密钥、Token 和 DB v2 描述是迁移前的代码事实，不是继续扩展的目标模型。新实现应遵循 [身份与 Device Flow 设计](identity-and-device-flow.md)，不能只移除 Console 的用户选择字段而保留后端隐式 User 绑定。
+
 ## 对照 Headscale 的职责分层
 
 | Headscale 参考 | 本项目 | 责任 |
@@ -17,7 +19,7 @@
 
 `State` 在锁内生成独立快照，完成校验与 SQL 事务后发布新 revision，再通知 Edge。失败事务不会发布内存状态；同一配置重传不产生新审计或重新进入待批准。读接口返回脱离内部对象的视图。当前写入是完整事务快照，面向单控制进程；PostgreSQL 并不自动提供多控制节点同步。
 
-## 实体关系
+## 当前实体关系（身份迁移前）
 
 ```mermaid
 erDiagram
