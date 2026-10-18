@@ -631,10 +631,25 @@ func TestGrantDeadlineClosesServeFlow(t *testing.T) {
 }
 
 func TestRevocationInterruptsStalledRequestBody(t *testing.T) {
+	for _, outerGuard := range []bool{false, true} {
+		name := "direct"
+		if outerGuard {
+			name = "gateway-guard"
+		}
+		t.Run(name, func(t *testing.T) { testRevocationInterruptsStalledRequestBody(t, outerGuard) })
+	}
+}
+
+func testRevocationInterruptsStalledRequestBody(t *testing.T, outerGuard bool) {
 	h := newHarness(t)
+	uploadStarted := make(chan error, 1)
 	providerCanceled := make(chan struct{}, 1)
 	h.provider(t, "office", "c", nil, func(flow *connection.Stream) {
 		request, err := http.ReadRequest(bufio.NewReader(flow))
+		if err == nil {
+			_, err = io.ReadFull(request.Body, make([]byte, 1))
+		}
+		uploadStarted <- err
 		if err == nil {
 			_, _ = io.Copy(io.Discard, request.Body)
 			request.Body.Close()
@@ -642,18 +657,38 @@ func TestRevocationInterruptsStalledRequestBody(t *testing.T) {
 		<-flow.Context().Done()
 		providerCanceled <- struct{}{}
 	})
-	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.e.ServeHTTP(w, r, "alice") }))
+	handlerDone := make(chan struct{})
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(handlerDone)
+		if outerGuard {
+			r = GuardRequestBody(w, r)
+			defer r.Body.Close()
+		}
+		h.e.ServeHTTP(w, r, "alice")
+	}))
 	defer gw.Close()
 	client, err := net.Dial("tcp", gw.Listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	_, err = io.WriteString(client, "POST /upload HTTP/1.1\r\nHost: demo.workspace1.instance.example\r\nContent-Length: 1000000\r\n\r\nx")
+	// Flush enough bytes through net/http's request writer to prove that the
+	// provider is reading an admitted upload; leave most of the body unsent.
+	_, err = io.WriteString(client, "POST /upload HTTP/1.1\r\nHost: demo.workspace1.instance.example\r\nContent-Length: 1000000\r\n\r\n"+strings.Repeat("x", 64<<10))
 	if err != nil {
 		t.Fatal(err)
 	}
-	await(t, func() bool { return len(h.e.Snapshot().Flows) == 1 })
+	// A pending Edge flow is registered before OPEN. Waiting for len(Flows)==1
+	// could revoke before the provider handler exists, then wait forever for a
+	// cancellation notification from a handler that correctly never ran.
+	select {
+	case err := <-uploadStarted:
+		if err != nil {
+			t.Fatalf("provider upload did not start: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("provider did not receive the partial upload")
+	}
 	h.b.mu.Lock()
 	delete(h.b.serve, "demo.workspace1.instance.example/alice")
 	h.b.mu.Unlock()
@@ -663,7 +698,68 @@ func TestRevocationInterruptsStalledRequestBody(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("stalled upload kept provider flow alive")
 	}
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("stalled upload blocked HTTP body cleanup")
+	}
 	await(t, func() bool { return len(h.e.Snapshot().Flows) == 0 })
+}
+
+func TestRevocationCancelsPendingUploadBeforeProviderHandler(t *testing.T) {
+	h := newHarness(t)
+	opening := make(chan struct{})
+	canceled := make(chan struct{})
+	var handlerCalls atomic.Int32
+	h.provider(t, "office", "c", func(ctx context.Context, _ connection.Principal, _ connection.OpenRequest) (connection.OpenClaims, error) {
+		close(opening)
+		<-ctx.Done()
+		close(canceled)
+		return connection.OpenClaims{}, ctx.Err()
+	}, func(flow *connection.Stream) { handlerCalls.Add(1) })
+	handlerDone := make(chan struct{})
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(handlerDone)
+		r = GuardRequestBody(w, r)
+		defer r.Body.Close()
+		h.e.ServeHTTP(w, r, "alice")
+	}))
+	defer gw.Close()
+	client, err := net.Dial("tcp", gw.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err = io.WriteString(client, "POST /upload HTTP/1.1\r\nHost: demo.workspace1.instance.example\r\nContent-Length: 1000000\r\n\r\nx"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-opening:
+	case <-time.After(3 * time.Second):
+		t.Fatal("provider OPEN did not begin")
+	}
+	snapshot := h.e.Snapshot()
+	if len(snapshot.Flows) != 1 || snapshot.Flows[0].State != "pending" {
+		t.Fatalf("expected pending OPEN: %+v", snapshot.Flows)
+	}
+	h.b.mu.Lock()
+	delete(h.b.serve, "demo.workspace1.instance.example/alice")
+	h.b.mu.Unlock()
+	h.b.changed()
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("pending provider OPEN was not canceled")
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("pending upload blocked HTTP body cleanup")
+	}
+	await(t, func() bool { return len(h.e.Snapshot().Flows) == 0 })
+	if handlerCalls.Load() != 0 {
+		t.Fatal("revoked pending OPEN reached provider business handler")
+	}
 }
 
 func TestRollingLeaseThroughRealProviderManager(t *testing.T) {
