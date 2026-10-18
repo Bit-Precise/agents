@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agents/control/db"
@@ -40,6 +41,9 @@ type Config struct {
 	EdgeInternalURL   string     `yaml:"edgeInternalURL"`
 	ConsoleURL        string     `yaml:"consoleURL"`
 	OIDC              OIDCConfig `yaml:"oidc"`
+	// ServiceGrantTTL is the window of the Workspace-member grant created when a
+	// service is first published (default 168h, at most 720h).
+	ServiceGrantTTL time.Duration `yaml:"serviceGrantTTL"`
 }
 
 type OIDCConfig struct {
@@ -141,6 +145,9 @@ func (c Config) ValidateFor(mode string) error {
 	}
 	if c.DevelopmentHTTP && c.TLSOffload {
 		return errors.New("developmentHTTP and tlsOffload are mutually exclusive")
+	}
+	if c.ServiceGrantTTL < 0 || c.ServiceGrantTTL > 30*24*time.Hour {
+		return errors.New("serviceGrantTTL must be between 0 (default) and 720h")
 	}
 	for _, value := range []string{c.ControlURL, c.EdgeInternalURL, c.ConsoleURL} {
 		if value == "" {

@@ -173,13 +173,13 @@ func (h *harness) workspace(name, userName string) (types.Workspace, userCredent
 	return w, u
 }
 
-func (h *harness) enroll(cfg *config.Config, w types.Workspace, u userCredential, roles []string, auto bool) (types.EnrollResponse, *controlclient.Client) {
+func (h *harness) enroll(cfg *config.Config, w types.Workspace, u userCredential, roles []string) (types.EnrollResponse, *controlclient.Client) {
 	h.t.Helper()
 	var key struct {
 		Key   types.EnrollmentKey `json:"key"`
 		Token string              `json:"token"`
 	}
-	h.api("POST", "/v1/admin/enrollment-keys", adminToken, map[string]any{"workspaceId": w.ID, "userId": u.User.ID, "roles": roles, "maxUses": 1, "autoApprove": auto, "expiresAt": time.Now().Add(time.Hour)}, &key, 201)
+	h.api("POST", "/v1/admin/enrollment-keys", adminToken, map[string]any{"workspaceId": w.ID, "userId": u.User.ID, "roles": roles, "maxUses": 1, "expiresAt": time.Now().Add(time.Hour)}, &key, 201)
 	client, err := controlclient.New(cfg)
 	if err != nil {
 		h.t.Fatal(err)

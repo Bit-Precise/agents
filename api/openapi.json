@@ -123,7 +123,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AgentConfig"
+                "$ref": "#/components/schemas/ConfigUpdate"
               }
             }
           }
@@ -138,7 +138,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "description": "Control validates the desired spec automatically: 400 invalid, 403 beyond the role ceiling or policy, 409 name conflict. On success the new effective configuration applies at once; nothing waits for approval."
       }
     },
     "/auth/oidc/login": {
@@ -1231,13 +1232,6 @@
             }
           },
           {
-            "name": "pendingApproval",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
             "name": "q",
             "in": "query",
             "schema": {
@@ -1331,57 +1325,6 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateAgent"
-              }
-            }
-          }
-        },
-        "description": "Requires an active instance administrator; non-administrators receive 403 before resource lookup."
-      }
-    },
-    "/v1/admin/agents/{id}/approval": {
-      "put": {
-        "operationId": "putAdminAgentApproval",
-        "tags": [
-          "Administration"
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Agent"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "API error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutAgentApproval"
               }
             }
           }
@@ -2668,13 +2611,6 @@
             }
           },
           {
-            "name": "pendingApproval",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
             "name": "q",
             "in": "query",
             "schema": {
@@ -3702,64 +3638,6 @@
             }
           }
         ]
-      }
-    },
-    "/v1/workspaces/{workspaceId}/agents/{agentId}/approval": {
-      "put": {
-        "operationId": "putWorkspaceAgentApproval",
-        "tags": [
-          "Management"
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Agent"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "API error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "workspaceId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "agentId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutAgentApproval"
-              }
-            }
-          }
-        }
       }
     },
     "/v1/workspaces/{workspaceId}/ingresses": {
@@ -5486,7 +5364,8 @@
             "type": "object",
             "properties": {
               "kind": {
-                "type": "string"
+                "type": "string",
+                "description": "invalid, unauthorized, forbidden, not_found, conflict, expired, unavailable, internal; data-plane failures may also report origin or capacity."
               },
               "message": {
                 "type": "string"
@@ -5500,17 +5379,6 @@
         },
         "required": [
           "error"
-        ]
-      },
-      "OK": {
-        "type": "object",
-        "properties": {
-          "ok": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "ok"
         ]
       },
       "User": {
@@ -5623,263 +5491,6 @@
           "protocol"
         ]
       },
-      "Listener": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "listen": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "enabled",
-          "listen"
-        ]
-      },
-      "AgentConfig": {
-        "type": "object",
-        "properties": {
-          "apiVersion": {
-            "type": "string",
-            "enum": [
-              "agents/v1alpha1"
-            ]
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "AgentConfig"
-            ]
-          },
-          "instance": {
-            "type": "string"
-          },
-          "workspace": {
-            "type": "string"
-          },
-          "agent": {
-            "type": "object",
-            "properties": {
-              "name": {
-                "type": "string"
-              },
-              "stateDir": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "name",
-              "stateDir"
-            ]
-          },
-          "transport": {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string"
-              },
-              "endpoint": {
-                "type": "string"
-              },
-              "mode": {
-                "type": "string"
-              },
-              "caFile": {
-                "type": "string"
-              },
-              "allowHTTP": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "type",
-              "endpoint",
-              "mode"
-            ]
-          },
-          "ingress": {
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "type": "boolean"
-              },
-              "http": {
-                "$ref": "#/components/schemas/Listener"
-              },
-              "socks": {
-                "$ref": "#/components/schemas/Listener"
-              },
-              "tun": {
-                "type": "object",
-                "properties": {
-                  "enabled": {
-                    "type": "boolean"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "dns": {
-                    "type": "object",
-                    "properties": {
-                      "mode": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "mode"
-                    ]
-                  }
-                },
-                "required": [
-                  "enabled",
-                  "name",
-                  "dns"
-                ]
-              },
-              "routes": {
-                "type": [
-                  "array",
-                  "null"
-                ],
-                "items": {
-                  "$ref": "#/components/schemas/Rule"
-                }
-              },
-              "onUnmatched": {
-                "type": "string",
-                "enum": [
-                  "reject"
-                ]
-              }
-            },
-            "required": [
-              "enabled",
-              "http",
-              "socks",
-              "tun",
-              "routes",
-              "onUnmatched"
-            ]
-          },
-          "serve": {
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "type": "boolean"
-              },
-              "services": {
-                "type": [
-                  "array",
-                  "null"
-                ],
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "name": {
-                      "type": "string"
-                    },
-                    "origin": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "name",
-                    "origin"
-                  ]
-                }
-              }
-            },
-            "required": [
-              "enabled",
-              "services"
-            ]
-          },
-          "egress": {
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "type": "boolean"
-              },
-              "allow": {
-                "type": [
-                  "array",
-                  "null"
-                ],
-                "items": {
-                  "$ref": "#/components/schemas/Rule"
-                }
-              },
-              "deny": {
-                "type": [
-                  "array",
-                  "null"
-                ],
-                "items": {
-                  "$ref": "#/components/schemas/Rule"
-                }
-              }
-            },
-            "required": [
-              "enabled",
-              "allow",
-              "deny"
-            ]
-          }
-        },
-        "required": [
-          "apiVersion",
-          "kind",
-          "instance",
-          "workspace",
-          "agent",
-          "transport",
-          "ingress",
-          "serve",
-          "egress"
-        ]
-      },
-      "Approval": {
-        "type": "object",
-        "properties": {
-          "revision": {
-            "type": "integer"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "services": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "egress": {
-            "type": [
-              "array",
-              "null"
-            ],
-            "items": {
-              "$ref": "#/components/schemas/Rule"
-            }
-          },
-          "deny": {
-            "type": [
-              "array",
-              "null"
-            ],
-            "items": {
-              "$ref": "#/components/schemas/Rule"
-            }
-          }
-        },
-        "required": [
-          "revision",
-          "expiresAt"
-        ]
-      },
       "Agent": {
         "type": "object",
         "properties": {
@@ -5901,20 +5512,9 @@
           "status": {
             "type": "string",
             "enum": [
-              "pending",
               "active",
               "revoked"
             ]
-          },
-          "desired": {
-            "$ref": "#/components/schemas/AgentConfig"
-          },
-          "approval": {
-            "$ref": "#/components/schemas/Approval"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
           },
           "roles": {
             "type": "array",
@@ -5925,10 +5525,25 @@
                 "serve",
                 "egress"
               ]
-            }
+            },
+            "description": "Enrollment role ceiling, not the enabled roles."
           },
-          "pendingApproval": {
-            "type": "boolean"
+          "desired": {
+            "$ref": "#/components/schemas/AgentSpec"
+          },
+          "effective": {
+            "$ref": "#/components/schemas/EffectiveConfig"
+          },
+          "lastRejection": {
+            "$ref": "#/components/schemas/ConfigRejection"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -5938,11 +5553,10 @@
           "userId",
           "name",
           "status",
-          "desired",
-          "approval",
-          "createdAt",
           "roles",
-          "pendingApproval"
+          "desired",
+          "effective",
+          "createdAt"
         ]
       },
       "EnrollmentKey": {
@@ -5968,9 +5582,6 @@
               ]
             }
           },
-          "autoApprove": {
-            "type": "boolean"
-          },
           "uses": {
             "type": "integer"
           },
@@ -5990,77 +5601,10 @@
           "workspaceId",
           "userId",
           "roles",
-          "autoApprove",
           "uses",
           "maxUses",
           "expiresAt",
           "revoked"
-        ]
-      },
-      "Service": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "workspaceId": {
-            "type": "string"
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "hostname": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "workspaceId",
-          "agentId",
-          "name",
-          "hostname",
-          "enabled"
-        ]
-      },
-      "EgressRoute": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "workspaceId": {
-            "type": "string"
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "rule": {
-            "$ref": "#/components/schemas/Rule"
-          },
-          "priority": {
-            "type": "integer"
-          },
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "workspaceId",
-          "agentId",
-          "name",
-          "rule",
-          "priority",
-          "enabled"
         ]
       },
       "Grant": {
@@ -6103,6 +5647,13 @@
           },
           "revoked": {
             "type": "boolean"
+          },
+          "external": {
+            "type": "boolean",
+            "description": "A manager authorized sharing beyond the resource Workspace; otherwise a user grant applies only while its subject is a member."
+          },
+          "createdBy": {
+            "type": "string"
           }
         },
         "required": [
@@ -6113,7 +5664,8 @@
           "subjectType",
           "startsAt",
           "expiresAt",
-          "revoked"
+          "revoked",
+          "external"
         ]
       },
       "Audit": {
@@ -6144,7 +5696,6 @@
           "actorId",
           "action",
           "resourceId",
-          "detail",
           "at"
         ]
       },
@@ -6391,7 +5942,8 @@
         "type": "object",
         "properties": {
           "version": {
-            "type": "integer"
+            "type": "integer",
+            "const": 2
           },
           "workspace": {
             "type": "string"
@@ -6411,15 +5963,15 @@
           "controlUrl": {
             "type": "string"
           },
-          "approval": {
-            "$ref": "#/components/schemas/Approval"
+          "effective": {
+            "$ref": "#/components/schemas/EffectiveConfig"
           }
         },
         "required": [
           "version",
           "workspace",
           "agentId",
-          "approval"
+          "effective"
         ]
       },
       "EnrollRequest": {
@@ -6428,14 +5980,31 @@
           "enrollmentKey": {
             "type": "string"
           },
-          "config": {
-            "$ref": "#/components/schemas/AgentConfig"
+          "instance": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "desired": {
+            "$ref": "#/components/schemas/AgentSpec"
           }
         },
         "required": [
           "enrollmentKey",
-          "config"
-        ]
+          "instance",
+          "endpoint",
+          "workspace",
+          "name",
+          "desired"
+        ],
+        "additionalProperties": false
       },
       "EnrollResponse": {
         "type": "object",
@@ -6499,9 +6068,6 @@
               ]
             }
           },
-          "autoApprove": {
-            "type": "boolean"
-          },
           "maxUses": {
             "type": "integer"
           },
@@ -6512,41 +6078,7 @@
         },
         "required": [
           "workspaceId",
-          "userId",
-          "roles",
-          "maxUses",
-          "expiresAt"
-        ],
-        "additionalProperties": false
-      },
-      "CreateEgressRoute": {
-        "type": "object",
-        "properties": {
-          "workspaceId": {
-            "type": "string"
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "rule": {
-            "$ref": "#/components/schemas/Rule"
-          },
-          "priority": {
-            "type": "integer"
-          },
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "workspaceId",
-          "agentId",
-          "name",
-          "rule",
-          "priority"
+          "roles"
         ],
         "additionalProperties": false
       },
@@ -6591,7 +6123,6 @@
           "resourceType",
           "resourceId",
           "subjectType",
-          "startsAt",
           "expiresAt"
         ],
         "additionalProperties": false
@@ -6680,18 +6211,6 @@
         ],
         "additionalProperties": false
       },
-      "PutAgentApproval": {
-        "type": "object",
-        "properties": {
-          "expectedDesired": {
-            "$ref": "#/components/schemas/AgentConfig"
-          }
-        },
-        "required": [
-          "expectedDesired"
-        ],
-        "additionalProperties": false
-      },
       "UpdateEnrollmentKey": {
         "type": "object",
         "properties": {
@@ -6702,30 +6221,6 @@
         },
         "required": [
           "revoked"
-        ],
-        "additionalProperties": false
-      },
-      "UpdateService": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "enabled"
-        ],
-        "additionalProperties": false
-      },
-      "UpdateEgressRoute": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "enabled"
         ],
         "additionalProperties": false
       },
@@ -6837,44 +6332,6 @@
         ],
         "additionalProperties": false
       },
-      "ServicesPage": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Service"
-            }
-          },
-          "pagination": {
-            "$ref": "#/components/schemas/Pagination"
-          }
-        },
-        "required": [
-          "items",
-          "pagination"
-        ],
-        "additionalProperties": false
-      },
-      "EgressRoutesPage": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EgressRoute"
-            }
-          },
-          "pagination": {
-            "$ref": "#/components/schemas/Pagination"
-          }
-        },
-        "required": [
-          "items",
-          "pagination"
-        ],
-        "additionalProperties": false
-      },
       "GrantsPage": {
         "type": "object",
         "properties": {
@@ -6961,10 +6418,8 @@
             "$ref": "#/components/schemas/AgentSummary"
           },
           "enabled": {
-            "type": "boolean"
-          },
-          "approvedRevision": {
-            "type": "integer"
+            "type": "boolean",
+            "description": "The role is in the Agent's effective configuration."
           },
           "status": {
             "type": "string"
@@ -6974,13 +6429,16 @@
           },
           "workspaceId": {
             "type": "string"
+          },
+          "effectiveRevision": {
+            "type": "integer"
           }
         },
         "required": [
           "agentId",
           "agent",
           "enabled",
-          "approvedRevision",
+          "effectiveRevision",
           "status",
           "id",
           "workspaceId"
@@ -6997,10 +6455,8 @@
             "$ref": "#/components/schemas/AgentSummary"
           },
           "enabled": {
-            "type": "boolean"
-          },
-          "approvedRevision": {
-            "type": "integer"
+            "type": "boolean",
+            "description": "The role is in the Agent's effective configuration."
           },
           "status": {
             "type": "string"
@@ -7010,13 +6466,16 @@
           },
           "workspaceId": {
             "type": "string"
+          },
+          "effectiveRevision": {
+            "type": "integer"
           }
         },
         "required": [
           "agentId",
           "agent",
           "enabled",
-          "approvedRevision",
+          "effectiveRevision",
           "status",
           "id",
           "workspaceId"
@@ -7119,25 +6578,6 @@
         ],
         "additionalProperties": false
       },
-      "WorkspaceAgentsPage": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Agent"
-            }
-          },
-          "pagination": {
-            "$ref": "#/components/schemas/Pagination"
-          }
-        },
-        "required": [
-          "items",
-          "pagination"
-        ],
-        "additionalProperties": false
-      },
       "WorkspaceIngressesPage": {
         "type": "object",
         "properties": {
@@ -7226,7 +6666,6 @@
           "status": {
             "type": "string",
             "enum": [
-              "pending",
               "active",
               "revoked"
             ]
@@ -7241,17 +6680,13 @@
                 "egress"
               ]
             }
-          },
-          "pendingApproval": {
-            "type": "boolean"
           }
         },
         "required": [
           "id",
           "name",
           "status",
-          "roles",
-          "pendingApproval"
+          "roles"
         ]
       },
       "CreateWorkspaceEnrollmentKey": {
@@ -7271,9 +6706,6 @@
               ]
             }
           },
-          "autoApprove": {
-            "type": "boolean"
-          },
           "maxUses": {
             "type": "integer"
           },
@@ -7283,37 +6715,7 @@
           }
         },
         "required": [
-          "userId",
-          "roles",
-          "maxUses",
-          "expiresAt"
-        ],
-        "additionalProperties": false
-      },
-      "CreateWorkspaceEgressRoute": {
-        "type": "object",
-        "properties": {
-          "agentId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "rule": {
-            "$ref": "#/components/schemas/Rule"
-          },
-          "priority": {
-            "type": "integer"
-          },
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "agentId",
-          "name",
-          "rule",
-          "priority"
+          "roles"
         ],
         "additionalProperties": false
       },
@@ -7354,7 +6756,6 @@
           "resourceType",
           "resourceId",
           "subjectType",
-          "startsAt",
           "expiresAt"
         ],
         "additionalProperties": false
@@ -7506,6 +6907,268 @@
           "kind"
         ],
         "additionalProperties": false
+      },
+      "AgentSpec": {
+        "type": "object",
+        "description": "Server-relevant desired configuration derived from config.yaml. Local paths, listeners, transport details and ingress routes are never uploaded.",
+        "properties": {
+          "ingress": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "serve": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "services": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "$ref": "#/components/schemas/ServiceSpec"
+                }
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "egress": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "allow": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "$ref": "#/components/schemas/Rule"
+                }
+              },
+              "deny": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "$ref": "#/components/schemas/Rule"
+                }
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          }
+        },
+        "required": [
+          "ingress",
+          "serve",
+          "egress"
+        ]
+      },
+      "ServiceSpec": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "origin"
+        ]
+      },
+      "EffectiveConfig": {
+        "type": "object",
+        "description": "Desired ∩ role ceiling ∩ Workspace policy, computed automatically by Control. The revision advances only when the content changes; expiresAt bounds offline use by agentd.",
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "policy": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ingress": {
+            "type": "boolean"
+          },
+          "services": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/EffectiveService"
+            }
+          },
+          "egress": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            }
+          },
+          "deny": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            }
+          }
+        },
+        "required": [
+          "revision",
+          "ingress"
+        ]
+      },
+      "EffectiveService": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "origin",
+          "hostname"
+        ]
+      },
+      "ConfigRejection": {
+        "type": "object",
+        "description": "The most recent desired update Control rejected; the previous effective configuration keeps running.",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "message"
+        ]
+      },
+      "ConfigUpdate": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "desired": {
+            "$ref": "#/components/schemas/AgentSpec"
+          }
+        },
+        "required": [
+          "workspace",
+          "name",
+          "desired"
+        ],
+        "additionalProperties": false
+      },
+      "Service": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "agentId",
+          "name",
+          "hostname",
+          "enabled"
+        ]
+      },
+      "EgressRoute": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rule": {
+            "$ref": "#/components/schemas/Rule"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "agentId",
+          "name",
+          "rule",
+          "priority",
+          "enabled"
+        ]
       }
     }
   }

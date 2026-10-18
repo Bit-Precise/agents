@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bit-precise/agents/control/types"
@@ -82,12 +83,13 @@ func TestVersionOneMigrationPreservesUsersTokensAndRevision(t *testing.T) {
 		t.Fatalf("migration altered v1 data: %+v", loaded)
 	}
 	var version int
-	if err := store.sql.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 2 {
+	if err := store.sql.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 3 {
 		t.Fatalf("migration version %d: %v", version, err)
 	}
+	previous := loaded
 	loaded.Revision++
 	loaded.OIDCIdentities = []types.OIDCIdentity{{Issuer: "https://idp.example", Subject: "stable-subject", UserID: user.ID}}
-	if err := store.Save(t.Context(), loaded, 17); err != nil {
+	if err := store.Save(t.Context(), previous, loaded); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -111,11 +113,11 @@ func TestSaveRevisionConflictAndTransactionRollback(t *testing.T) {
 	}
 	defer store.Close()
 	first := types.Snapshot{Revision: 1, Users: []types.User{{ID: "u", Name: "alice"}}}
-	if err = store.Save(t.Context(), first, 0); err != nil {
+	if err = store.Save(t.Context(), types.Snapshot{}, first); err != nil {
 		t.Fatal(err)
 	}
 	bad := types.Snapshot{Revision: 2, Users: []types.User{{ID: "u2", Name: "bad"}}, Agents: []types.Agent{{ID: "a", WorkspaceID: "nonexistent", UserID: "u2", Name: "invalid"}}}
-	if err = store.Save(t.Context(), bad, 1); err == nil {
+	if err = store.Save(t.Context(), first, bad); err == nil {
 		t.Fatal("invalid snapshot committed")
 	}
 	loaded, err := store.Load(t.Context())
@@ -125,7 +127,111 @@ func TestSaveRevisionConflictAndTransactionRollback(t *testing.T) {
 	if loaded.Revision != 1 || len(loaded.Users) != 1 || loaded.Users[0].Name != "alice" {
 		t.Fatal("failed transaction partially changed control state")
 	}
-	if err = store.Save(t.Context(), types.Snapshot{Revision: 2}, 0); types.KindOf(err) != "conflict" {
+	if err = store.Save(t.Context(), types.Snapshot{}, types.Snapshot{Revision: 1}); types.KindOf(err) != "conflict" {
 		t.Fatalf("stale control writer was not fenced: %v", err)
+	}
+}
+
+func TestApprovalRemovalMigrationKeepsTraceAndGrantScope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v2.sqlite")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := append(append([]string(nil), schema...),
+		`CREATE TABLE oidc_identities (issuer TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), payload TEXT NOT NULL, PRIMARY KEY(issuer,subject))`,
+		"UPDATE control_meta SET schema_version=2, revision=40 WHERE id=1",
+		`INSERT INTO users(id,name,payload) VALUES('owner','owner','{"id":"owner","name":"owner"}'),('dev','dev','{"id":"dev","name":"dev"}'),('gone','gone','{"id":"gone","name":"gone"}'),('outsider','outsider','{"id":"outsider","name":"outsider"}')`,
+		`INSERT INTO workspaces(id,name,payload) VALUES('w','work','{"id":"w","name":"work"}')`,
+		`INSERT INTO memberships(workspace_id,user_id,role,payload) VALUES('w','owner','owner','{"workspaceId":"w","userId":"owner","role":"owner"}'),('w','dev','developer','{"workspaceId":"w","userId":"dev","role":"developer"}')`,
+		`INSERT INTO agents(id,workspace_id,user_id,name,payload) VALUES('a','w','dev','laptop','{"id":"a","workspaceId":"w","workspace":"work","userId":"dev","name":"laptop","status":"pending","pendingApproval":true,"roles":["serve"],
+			"desired":{"apiVersion":"agents/v1alpha1","agent":{"name":"laptop","stateDir":"/home/dev/state"},"serve":{"enabled":true,"services":[{"name":"demo","origin":"http://127.0.0.1:8080"}]}},
+			"approval":{"revision":37,"expiresAt":"2026-01-01T00:00:00Z","services":{"demo":"http://127.0.0.1:7070"}}}')`,
+		`INSERT INTO services(id,workspace_id,agent_id,name,hostname,payload) VALUES('s','w','a','demo','demo.work.example','{"id":"s","workspaceId":"w","agentId":"a","name":"demo","hostname":"demo.work.example","enabled":true}')`,
+		`INSERT INTO enrollment_keys(id,workspace_id,user_id,payload) VALUES('k','w','dev','{"id":"k","workspaceId":"w","userId":"dev","roles":["serve"],"autoApprove":true,"maxUses":1}')`,
+		`INSERT INTO grants(id,workspace_id,resource_type,service_id,subject_type,subject_user_id,payload) VALUES
+			('by-dev','w','service','s','user','gone','{"id":"by-dev","workspaceId":"w","resourceType":"service","resourceId":"s","subjectType":"user","subjectId":"gone"}'),
+			('by-owner','w','service','s','user','outsider','{"id":"by-owner","workspaceId":"w","resourceType":"service","resourceId":"s","subjectType":"user","subjectId":"outsider"}'),
+			('member','w','service','s','user','dev','{"id":"member","workspaceId":"w","resourceType":"service","resourceId":"s","subjectType":"user","subjectId":"dev"}')`,
+		`INSERT INTO audit(id,payload) VALUES('e1','{"id":"e1","actorId":"dev","action":"grant.create","resourceId":"by-dev"}'),('e2','{"id":"e2","actorId":"owner","action":"grant.create","resourceId":"by-owner"}')`,
+	)
+	for _, statement := range statements {
+		if _, err := legacy.ExecContext(t.Context(), statement); err != nil {
+			legacy.Close()
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(t.Context(), Options{DSN: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	snap, err := store.Load(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := snap.Agents[0]
+	if snap.Revision != 40 || a.Status != "active" || !a.Desired.Serve.Enabled || len(a.Desired.Serve.Services) != 1 || a.Effective.Revision != 37 ||
+		len(a.Effective.Services) != 1 || a.Effective.Services[0].Origin != "http://127.0.0.1:7070" || a.Effective.Services[0].Hostname != "demo.work.example" {
+		t.Fatalf("legacy agent was not converted to its approved effective configuration: %+v", a)
+	}
+	data, _ := json.Marshal(snap)
+	if strings.Contains(string(data), "/home/dev/state") || strings.Contains(string(data), "autoApprove") || strings.Contains(string(data), "pendingApproval\":true,\"approval") {
+		t.Fatal("local paths or approval fields survived the migration")
+	}
+	traced := false
+	for _, e := range snap.Audit {
+		traced = traced || e.Action == "agent.migrate.approval_removed" && e.ResourceID == "a" && strings.Contains(e.Detail, `"pendingApproval":true`) && strings.Contains(e.Detail, "7070")
+	}
+	if !traced {
+		t.Fatal("legacy approval was not kept in audit")
+	}
+	external := map[string]bool{}
+	for _, g := range snap.Grants {
+		external[g.ID] = g.External
+	}
+	if external["by-dev"] || !external["by-owner"] || external["member"] {
+		t.Fatalf("grant scope migrated incorrectly: %v", external)
+	}
+}
+
+func TestIncrementalSaveRoundTripsChangedRowsOnly(t *testing.T) {
+	store, err := Open(t.Context(), Options{DSN: filepath.Join(t.TempDir(), "db.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first := types.Snapshot{Revision: 1, Users: []types.User{{ID: "u", Name: "alice"}}, Workspaces: []types.Workspace{{ID: "w", Name: "work"}},
+		Memberships: []types.Membership{{WorkspaceID: "w", UserID: "u", Role: "developer"}},
+		Agents:      []types.Agent{{ID: "old", WorkspaceID: "w", UserID: "u", Name: "laptop", Status: "revoked"}},
+		Tokens:      []types.Token{{ID: "t", Hash: "h", Kind: "provider", UserID: "u", WorkspaceID: "w", AgentID: "old"}},
+		Audit:       []types.Audit{{ID: "a1", Action: "one"}}}
+	if err = store.Save(t.Context(), types.Snapshot{}, first); err != nil {
+		t.Fatal(err)
+	}
+	// One commit changes a constrained column, purges a parent with its child,
+	// reuses the freed unique name and appends to the audit log.
+	second := first
+	second.Revision = 2
+	second.Memberships = []types.Membership{{WorkspaceID: "w", UserID: "u", Role: "maintainer"}}
+	second.Agents = []types.Agent{{ID: "new", WorkspaceID: "w", UserID: "u", Name: "laptop", Status: "active"}}
+	second.Tokens = nil
+	second.Audit = append(append([]types.Audit(nil), first.Audit...), types.Audit{ID: "a2", Action: "two"})
+	if err = store.Save(t.Context(), first, second); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Revision != 2 || len(loaded.Agents) != 1 || loaded.Agents[0].ID != "new" || loaded.Memberships[0].Role != "maintainer" || len(loaded.Tokens) != 0 || len(loaded.Audit) != 2 {
+		t.Fatalf("incremental save diverged from the snapshot: %+v", loaded)
+	}
+	var names int
+	if err := store.sql.QueryRow("SELECT COUNT(*) FROM names WHERE label='laptop' AND agent_id='new'").Scan(&names); err != nil || names != 1 {
+		t.Fatalf("name reservation did not move to the new agent: %d %v", names, err)
 	}
 }

@@ -71,6 +71,12 @@ func newApp(ctx context.Context, cfg Config, adminToken, internalToken string, s
 	if err != nil {
 		return nil, err
 	}
+	if cfg.ServiceGrantTTL != 0 {
+		if err = s.SetServiceGrantTTL(cfg.ServiceGrantTTL); err != nil {
+			s.Close()
+			return nil, err
+		}
+	}
 	if _, err = s.BootstrapAdmin(adminToken); err != nil {
 		s.Close()
 		return nil, err
@@ -153,17 +159,20 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	// Authorization-dependent responses must never be served from a CDN cache.
 	w.Header().Set("Cache-Control", "no-store")
-	if r.URL.Path == "/healthz" {
-		writeJSON(w, 200, map[string]string{"status": "ok"})
-		return
-	}
-	if strings.HasPrefix(r.URL.Path, controlrpc.Prefix) {
-		if a.internal == nil {
-			http.NotFound(w, r)
-		} else {
-			a.internal.ServeHTTP(w, r)
+	// Published service hosts always reach the service, even on platform paths.
+	if !edge.IsServiceHost(r.Host, a.Config.BaseDomain()) {
+		if r.URL.Path == "/healthz" {
+			writeJSON(w, 200, map[string]string{"status": "ok"})
+			return
 		}
-		return
+		if strings.HasPrefix(r.URL.Path, controlrpc.Prefix) {
+			if a.internal == nil {
+				http.NotFound(w, r)
+			} else {
+				a.internal.ServeHTTP(w, r)
+			}
+			return
+		}
 	}
 	edgeURL, _ := url.Parse(a.Config.EdgeURL)
 	controlURL, _ := url.Parse(a.Config.ServerURL)

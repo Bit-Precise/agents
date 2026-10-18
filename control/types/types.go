@@ -3,10 +3,11 @@ package types
 
 import (
 	"errors"
+	"time"
+
 	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/connection"
 	"github.com/bit-precise/agentd/policy"
-	"time"
 )
 
 type User struct {
@@ -26,13 +27,32 @@ type Membership struct {
 	UserID      string `json:"userId"`
 	Role        string `json:"role"`
 }
-type Agent = api.Agent
+
+// Agent is the persistent registration record; api.Agent is its API view.
+// Status is stored, not derived: every principal change cascades into it.
+// Effective is recomputed by Control whenever Desired or the role ceiling
+// changes, and its Revision advances only when its content changes.
+type Agent struct {
+	ID            string               `json:"id"`
+	WorkspaceID   string               `json:"workspaceId"`
+	UserID        string               `json:"userId"`
+	Name          string               `json:"name"`
+	Status        string               `json:"status"`
+	Roles         []string             `json:"roles"`
+	Desired       api.AgentSpec        `json:"desired"`
+	Effective     api.EffectiveConfig  `json:"effective"`
+	LastRejection *api.ConfigRejection `json:"lastRejection,omitempty"`
+	CreatedAt     time.Time            `json:"createdAt"`
+	RevokedAt     time.Time            `json:"revokedAt,omitzero"`
+}
+
+// EnrollmentKey.UserID is the User the enrolled device will run as, which a
+// manager may set to someone else; it is not the key's creator.
 type EnrollmentKey struct {
 	ID          string    `json:"id"`
 	WorkspaceID string    `json:"workspaceId"`
 	UserID      string    `json:"userId"`
 	Roles       []string  `json:"roles"`
-	AutoApprove bool      `json:"autoApprove"`
 	Uses        int       `json:"uses"`
 	MaxUses     int       `json:"maxUses"`
 	ExpiresAt   time.Time `json:"expiresAt"`
@@ -55,6 +75,11 @@ type EgressRoute struct {
 	Priority    int         `json:"priority"`
 	Enabled     bool        `json:"enabled"`
 }
+
+// Grant.External records whether a manager authorized sharing beyond the
+// resource Workspace. A user grant created without it applies only while the
+// subject remains a member, so leaving the Workspace cannot turn an internal
+// grant into an unapproved external share.
 type Grant struct {
 	ID           string    `json:"id"`
 	WorkspaceID  string    `json:"workspaceId"`
@@ -65,6 +90,8 @@ type Grant struct {
 	StartsAt     time.Time `json:"startsAt"`
 	ExpiresAt    time.Time `json:"expiresAt"`
 	Revoked      bool      `json:"revoked"`
+	External     bool      `json:"external"`
+	CreatedBy    string    `json:"createdBy,omitempty"`
 }
 type Audit struct {
 	ID         string    `json:"id"`
@@ -72,7 +99,7 @@ type Audit struct {
 	ActorID    string    `json:"actorId"`
 	Action     string    `json:"action"`
 	ResourceID string    `json:"resourceId"`
-	Detail     string    `json:"detail"`
+	Detail     string    `json:"detail,omitempty"`
 }
 
 // Token hashes are persistence-only and are never returned in API snapshots.
@@ -122,19 +149,21 @@ type Snapshot struct {
 }
 type EnrollRequest = api.EnrollRequest
 type EnrollResponse = api.EnrollResponse
+
+// Decision is one data-plane authorization. Revision is the provider Agent's
+// effective revision at decision time; flows are rechecked by content, not by it.
 type Decision struct {
-	ResourceType   string
-	ResourceID     string
-	WorkspaceID    string
-	Workspace      string
-	AgentID        string
-	ServiceName    string
-	Hostname       string
-	UserID         string
-	Destination    connection.Destination
-	Revision       uint64
-	PolicyRevision uint64
-	ExpiresAt      time.Time
+	ResourceType string
+	ResourceID   string
+	WorkspaceID  string
+	Workspace    string
+	AgentID      string
+	ServiceName  string
+	Hostname     string
+	UserID       string
+	Destination  connection.Destination
+	Revision     uint64
+	ExpiresAt    time.Time
 }
 
 type ErrorKind string

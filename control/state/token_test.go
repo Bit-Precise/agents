@@ -10,7 +10,7 @@ import (
 
 func TestAgentTokenRefreshIsReadOnlyUntilNearExpiry(t *testing.T) {
 	f := setup(t)
-	enrolled := f.enroll(t, true)
+	enrolled := f.enroll(t)
 	before, _ := f.s.SnapshotForUser(f.admin.ID)
 	for i := 0; i < 2; i++ {
 		if _, err := f.s.GetAgentCredentials(enrolled.Credentials.ControlToken); err != nil {
@@ -100,7 +100,7 @@ func TestExpiredOrRevokedControlTokenCannotRenew(t *testing.T) {
 	for _, revoked := range []bool{false, true} {
 		t.Run(map[bool]string{false: "expired", true: "revoked"}[revoked], func(t *testing.T) {
 			f := setup(t)
-			enrolled := f.enroll(t, true)
+			enrolled := f.enroll(t)
 			if err := f.s.mutate(func(snap *types.Snapshot) error {
 				for i := range snap.Tokens {
 					token := &snap.Tokens[i]
@@ -130,7 +130,7 @@ func TestExpiredOrRevokedControlTokenCannotRenew(t *testing.T) {
 
 func TestUserRotationRetainsIdentityAndBootstrapDoesNotResurrect(t *testing.T) {
 	f := setup(t)
-	f.enroll(t, true)
+	f.enroll(t)
 	other, _, err := f.s.CreateUser(f.admin.ID, "other", false)
 	if err != nil {
 		t.Fatal(err)

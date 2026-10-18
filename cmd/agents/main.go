@@ -177,7 +177,7 @@ func run(args []string, out io.Writer, log zerolog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("read internal token: %w", err)
 		}
-		app, err := gateway.New(ctx, cfg.ControlURL, cfg.EdgeURL, internal, edge.Config{AllowLoopbackHTTP: cfg.DevelopmentHTTP, TLSOffload: cfg.TLSOffload})
+		app, err := gateway.New(ctx, cfg.ControlURL, cfg.EdgeURL, cfg.BaseDomain(), internal, edge.Config{AllowLoopbackHTTP: cfg.DevelopmentHTTP, TLSOffload: cfg.TLSOffload})
 		if err != nil {
 			return err
 		}

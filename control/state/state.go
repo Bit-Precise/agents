@@ -16,26 +16,42 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bit-precise/agentd/config"
-	"github.com/bit-precise/agentd/credentials"
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agents/control/db"
 	"github.com/bit-precise/agents/control/types"
-	"gopkg.in/yaml.v3"
 )
 
-const ApprovalTTL = 24 * time.Hour
-const TokenTTL = 30 * 24 * time.Hour
-const TokenRenewBefore = 7 * 24 * time.Hour
-const DefaultGrantTTL = 24 * time.Hour
+const (
+	// EffectiveTTL bounds how long agentd may keep its effective configuration
+	// without reaching Control. Every successful fetch renews it.
+	EffectiveTTL     = 24 * time.Hour
+	TokenTTL         = 30 * 24 * time.Hour
+	TokenRenewBefore = 7 * 24 * time.Hour
+	// DefaultServiceGrantTTL is the default window of the Workspace-member grant
+	// created when a service is first published. SetServiceGrantTTL overrides it.
+	DefaultServiceGrantTTL = 7 * 24 * time.Hour
+	// NameTombstoneTTL keeps a revoked Agent's names from being taken by another
+	// principal, so old links cannot be captured immediately.
+	NameTombstoneTTL = 7 * 24 * time.Hour
+	// PolicyVersion identifies the built-in Workspace policy: the enrollment
+	// role ceiling narrowed by the Workspace role (guests run ingress only).
+	PolicyVersion = "builtin/1"
+	// defaultGrantCreator marks grants created by the Workspace default policy.
+	defaultGrantCreator = "policy:default-member-access"
+)
 
 type State struct {
-	mu          sync.RWMutex
-	store       *db.Store
-	snapshot    types.Snapshot
-	baseDomain  string
-	subscribers map[chan struct{}]struct{}
-	closed      bool
+	// writeMu serializes mutations; mu only guards publication of snapshot,
+	// so readers keep the committed snapshot while a write is persisted.
+	writeMu         sync.Mutex
+	mu              sync.RWMutex
+	store           *db.Store
+	snapshot        types.Snapshot
+	baseDomain      string
+	serviceGrantTTL time.Duration
+	subscribers     map[chan struct{}]struct{}
+	closed          bool
 }
 
 func Open(ctx context.Context, options db.Options, baseDomain string) (*State, error) {
@@ -58,9 +74,30 @@ func New(ctx context.Context, store *db.Store, baseDomain string) (*State, error
 	if err != nil {
 		return nil, err
 	}
-	return &State{store: store, snapshot: snap, baseDomain: domain, subscribers: make(map[chan struct{}]struct{})}, nil
+	s := &State{store: store, snapshot: snap, baseDomain: domain, serviceGrantTTL: DefaultServiceGrantTTL, subscribers: make(map[chan struct{}]struct{})}
+	// Stored status and effective configuration are facts, not projections.
+	// Reconcile them once after load, including data migrated from the removed
+	// manual-approval model, and persist only if something changed.
+	if err := s.mutate(func(snap *types.Snapshot) error { reconcileAgents(snap); return nil }); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// SetServiceGrantTTL changes the default member-grant window for services
+// published from now on. It never changes existing grants.
+func (s *State) SetServiceGrantTTL(d time.Duration) error {
+	if d <= 0 || d > TokenTTL {
+		return problem(types.KindInvalid, "default service grant window must be positive and at most 30 days")
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.serviceGrantTTL = d
+	return nil
 }
 func (s *State) Close() error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -107,7 +144,13 @@ func (s *State) Revision() uint64 {
 func problem(kind types.ErrorKind, message string) error {
 	return &types.Error{Kind: kind, Message: message}
 }
+
+// clone deep-copies a snapshot. The append-only audit log, tokens and OIDC
+// bindings hold no references, so they are copied shallowly; Clip makes the
+// next append reallocate instead of writing into the committed backing array.
 func clone(snap types.Snapshot) (types.Snapshot, error) {
+	audit := snap.Audit
+	snap.Audit = nil
 	data, err := json.Marshal(snap)
 	if err != nil {
 		return types.Snapshot{}, err
@@ -116,27 +159,34 @@ func clone(snap types.Snapshot) (types.Snapshot, error) {
 	if err = json.Unmarshal(data, &out); err != nil {
 		return out, err
 	}
+	out.Audit = slices.Clip(audit)
 	out.Tokens = append([]types.Token(nil), snap.Tokens...)
 	out.OIDCIdentities = append([]types.OIDCIdentity(nil), snap.OIDCIdentities...)
 	return out, nil
 }
+
+// mutate applies fn to a private copy and publishes it only after the SQL
+// transaction commits. Readers are never blocked by the database write.
 func (s *State) mutate(fn func(*types.Snapshot) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.mu.RLock()
+	closed, current := s.closed, s.snapshot
+	s.mu.RUnlock()
+	if closed {
 		return problem(types.KindUnavailable, "control state is closed")
 	}
-	next, err := clone(s.snapshot)
+	next, err := clone(current)
 	if err != nil {
 		return err
 	}
 	if err = fn(&next); err != nil {
 		return err
 	}
-	if reflect.DeepEqual(next, s.snapshot) {
+	if reflect.DeepEqual(next, current) {
 		return nil
 	}
-	next.Revision = s.snapshot.Revision + 1
+	next.Revision = current.Revision + 1
 	// Mutation arguments and return values can contain caller-owned slices.
 	// Publish a second detached copy so callers cannot mutate committed policy.
 	next, err = clone(next)
@@ -145,12 +195,13 @@ func (s *State) mutate(fn func(*types.Snapshot) error) error {
 	}
 	commitCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err = s.store.Save(commitCtx, next, s.snapshot.Revision); err != nil {
+	if err = s.store.Save(commitCtx, current, next); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return problem(types.KindUnavailable, "control database commit timed out")
 		}
 		return err
 	}
+	s.mu.Lock()
 	s.snapshot = next
 	for ch := range s.subscribers {
 		select {
@@ -158,6 +209,7 @@ func (s *State) mutate(fn func(*types.Snapshot) error) error {
 		default:
 		}
 	}
+	s.mu.Unlock()
 	return nil
 }
 func randomID() string {
@@ -179,13 +231,8 @@ func hash(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 func label(name string) (string, error) {
-	name = strings.ToLower(name)
-	canonical, err := policy.CanonicalDomain(name + ".name.invalid")
+	canonical, err := policy.Label(strings.ToLower(name))
 	if err != nil {
-		return "", problem(types.KindInvalid, "invalid DNS label")
-	}
-	canonical = strings.TrimSuffix(canonical, ".name.invalid")
-	if strings.Contains(canonical, ".") || canonical == "" {
 		return "", problem(types.KindInvalid, "name must be one DNS label")
 	}
 	return canonical, nil
@@ -223,10 +270,23 @@ func member(snap *types.Snapshot, workspaceID, userID string) *types.Membership 
 	}
 	return nil
 }
+
+// requireUser authenticates the acting user. requireTargetUser checks a user
+// referenced by a request, so a missing target is not a session failure.
 func requireUser(snap *types.Snapshot, id string) (*types.User, error) {
 	u := user(snap, id)
 	if u == nil || u.Disabled {
 		return nil, problem(types.KindUnauthorized, "user is missing or disabled")
+	}
+	return u, nil
+}
+func requireTargetUser(snap *types.Snapshot, id string) (*types.User, error) {
+	u := user(snap, id)
+	if u == nil {
+		return nil, problem(types.KindNotFound, "user not found")
+	}
+	if u.Disabled {
+		return nil, problem(types.KindForbidden, "user is disabled")
 	}
 	return u, nil
 }
@@ -254,12 +314,27 @@ func requireManager(snap *types.Snapshot, actorID, workspaceID string) error {
 	}
 	return nil
 }
+func activeAdmins(snap *types.Snapshot) int {
+	count := 0
+	for _, u := range snap.Users {
+		if u.Admin && !u.Disabled {
+			count++
+		}
+	}
+	return count
+}
+
+// agentAllowed is a defense-in-depth check: cascades already store revocation
+// when the principal is disabled or leaves the Workspace.
 func agentAllowed(snap *types.Snapshot, a *types.Agent) bool {
 	u := user(snap, a.UserID)
-	return a.Status != "revoked" && u != nil && !u.Disabled && member(snap, a.WorkspaceID, a.UserID) != nil
+	return a.Status == api.StatusActive && u != nil && !u.Disabled && member(snap, a.WorkspaceID, a.UserID) != nil
 }
 func audit(snap *types.Snapshot, actor, action, resourceID string) {
-	snap.Audit = append(snap.Audit, types.Audit{ID: randomID(), At: time.Now().UTC(), ActorID: actor, Action: action, ResourceID: resourceID})
+	auditDetail(snap, actor, action, resourceID, "")
+}
+func auditDetail(snap *types.Snapshot, actor, action, resourceID, detail string) {
+	snap.Audit = append(snap.Audit, types.Audit{ID: randomID(), At: time.Now().UTC(), ActorID: actor, Action: action, ResourceID: resourceID, Detail: detail})
 }
 func tokenRecord(kind, plain, userID, workspaceID, agentID string, expires time.Time) types.Token {
 	return types.Token{ID: randomID(), Hash: hash(plain), Kind: kind, UserID: userID, WorkspaceID: workspaceID, AgentID: agentID, ExpiresAt: expires}
@@ -299,11 +374,12 @@ func identity(snap *types.Snapshot, plain string) (types.Identity, error) {
 		if a == nil || !agentAllowed(snap, a) {
 			return types.Identity{}, problem(types.KindUnauthorized, "agent is inactive")
 		}
-		if t.Kind == "provider" && (a.Status != "active" || member(snap, a.WorkspaceID, a.UserID).Role == "guest" || (!a.Desired.Serve.Enabled && !a.Desired.Egress.Enabled)) {
-			return types.Identity{}, problem(types.KindForbidden, "provider awaits approval")
+		ceiling := roleCeiling(snap, a)
+		if t.Kind == "provider" && !slices.Contains(ceiling, api.RoleServe) && !slices.Contains(ceiling, api.RoleEgress) {
+			return types.Identity{}, problem(types.KindForbidden, "provider roles are not permitted for this agent")
 		}
-		if t.Kind == "access" && (!slices.Contains(a.Roles, "ingress") || !a.Desired.Ingress.Enabled) {
-			return types.Identity{}, problem(types.KindForbidden, "access role is not enabled")
+		if t.Kind == "access" && !a.Effective.Ingress {
+			return types.Identity{}, problem(types.KindForbidden, "ingress is not in the effective configuration")
 		}
 	}
 	id := types.Identity{TokenID: t.ID, Kind: t.Kind, UserID: t.UserID, AgentID: t.AgentID, WorkspaceID: t.WorkspaceID, ExpiresAt: t.ExpiresAt}
@@ -490,7 +566,7 @@ func (s *State) SetMembership(actorID, workspaceID, userID, role string) (types.
 		if !validRole(role) {
 			return problem(types.KindInvalid, "invalid membership role")
 		}
-		if _, err := requireUser(snap, userID); err != nil {
+		if _, err := requireTargetUser(snap, userID); err != nil {
 			return err
 		}
 		actor := user(snap, actorID)
@@ -507,6 +583,12 @@ func (s *State) SetMembership(actorID, workspaceID, userID, role string) (types.
 			snap.Memberships = append(snap.Memberships, out)
 		} else {
 			*current = out
+		}
+		// A role change moves the role ceiling of this user's devices here.
+		for i := range snap.Agents {
+			if a := &snap.Agents[i]; a.WorkspaceID == w.ID && a.UserID == userID {
+				refreshEffective(snap, a)
+			}
 		}
 		audit(snap, actorID, "membership.set", userID)
 		return nil
@@ -535,16 +617,7 @@ func (s *State) RemoveMembership(actorID, workspaceID, userID string) error {
 			return problem(types.KindConflict, "workspace must retain an active owner")
 		}
 		snap.Memberships = slices.DeleteFunc(snap.Memberships, func(v types.Membership) bool { return v.WorkspaceID == w.ID && v.UserID == userID })
-		for i := range snap.Agents {
-			if snap.Agents[i].WorkspaceID == w.ID && snap.Agents[i].UserID == userID {
-				snap.Agents[i].Status = "revoked"
-			}
-		}
-		for i := range snap.Tokens {
-			if snap.Tokens[i].WorkspaceID == w.ID && snap.Tokens[i].UserID == userID {
-				snap.Tokens[i].Revoked = true
-			}
-		}
+		revokePrincipal(snap, actorID, userID, w.ID, "membership.remove")
 		audit(snap, actorID, "membership.remove", userID)
 		return nil
 	})
@@ -558,16 +631,8 @@ func (s *State) DisableUser(actorID, userID string) error {
 		if u == nil {
 			return problem(types.KindNotFound, "user not found")
 		}
-		if u.Admin {
-			found := false
-			for _, v := range snap.Users {
-				if v.ID != u.ID && v.Admin && !v.Disabled {
-					found = true
-				}
-			}
-			if !found {
-				return problem(types.KindConflict, "instance must retain an active administrator")
-			}
+		if u.Admin && !u.Disabled && activeAdmins(snap) < 2 {
+			return problem(types.KindConflict, "instance must retain an active administrator")
 		}
 		for _, m := range snap.Memberships {
 			if m.UserID == u.ID && m.Role == "owner" && lastOwner(snap, m.WorkspaceID, u.ID) && !solePersonalWorkspace(snap, m.WorkspaceID, u.ID) {
@@ -575,73 +640,72 @@ func (s *State) DisableUser(actorID, userID string) error {
 			}
 		}
 		u.Disabled = true
+		revokePrincipal(snap, actorID, u.ID, "", "user.disable")
+		for i := range snap.Tokens {
+			if snap.Tokens[i].Kind == "user" && snap.Tokens[i].UserID == u.ID {
+				snap.Tokens[i].Revoked = true
+			}
+		}
 		audit(snap, actorID, "user.disable", u.ID)
 		return nil
 	})
 }
 
-func validateDesired(cfg config.Config) (config.Config, error) {
-	for _, rules := range []struct {
-		values   []policy.Rule
-		required bool
-	}{{cfg.Ingress.Routes, true}, {cfg.Egress.Allow, true}, {cfg.Egress.Deny, false}} {
-		for _, rule := range rules.values {
-			if err := rule.Validate(rules.required); err != nil {
-				return cfg, problem(types.KindInvalid, err.Error())
-			}
+// revokePrincipal is the single cascade for a User losing its principal
+// status, everywhere (workspaceID == "") or in one Workspace: its devices are
+// revoked, and its unused enrollment keys and their tokens can no longer enroll.
+func revokePrincipal(snap *types.Snapshot, actorID, userID, workspaceID, reason string) {
+	in := func(ws string) bool { return workspaceID == "" || ws == workspaceID }
+	for i := range snap.Agents {
+		if a := &snap.Agents[i]; a.UserID == userID && in(a.WorkspaceID) {
+			revokeAgent(snap, a, actorID, reason)
 		}
 	}
-	encoded, err := json.Marshal(cfg)
-	if err != nil {
-		return cfg, err
-	}
-	var object any
-	if err = json.Unmarshal(encoded, &object); err != nil {
-		return cfg, err
-	}
-	var prune func(any)
-	prune = func(value any) {
-		switch v := value.(type) {
-		case map[string]any:
-			for k, child := range v {
-				if child == nil {
-					delete(v, k)
-				} else {
-					prune(child)
-				}
-			}
-		case []any:
-			for _, child := range v {
-				prune(child)
-			}
+	for i := range snap.EnrollmentKeys {
+		if k := &snap.EnrollmentKeys[i]; k.UserID == userID && in(k.WorkspaceID) {
+			revokeEnrollmentKey(snap, k)
 		}
 	}
-	prune(object)
-	data, err := yaml.Marshal(object)
-	if err != nil {
-		return cfg, err
+	for i := range snap.Tokens {
+		if t := &snap.Tokens[i]; t.UserID == userID && t.WorkspaceID != "" && in(t.WorkspaceID) {
+			t.Revoked = true
+		}
 	}
-	parsed, err := config.Parse(data, ".")
-	if err != nil {
-		return cfg, problem(types.KindInvalid, "invalid agent configuration: "+err.Error())
-	}
-	parsed.Agent.StateDir = cfg.Agent.StateDir
-	parsed.Transport.CAFile = cfg.Transport.CAFile
-	return *parsed, nil
 }
-func declaredRoles(cfg config.Config) []string {
-	var roles []string
-	if cfg.Ingress.Enabled {
-		roles = append(roles, "ingress")
+
+// revokeAgent is terminal. The device's tokens stop authenticating, its
+// effective configuration empties, and egress routes that exit through it are
+// disabled so they cannot shadow other routes. Its names stay reserved until
+// claimLabel reclaims them.
+func revokeAgent(snap *types.Snapshot, a *types.Agent, actorID, reason string) {
+	if a.Status == api.StatusRevoked {
+		return
 	}
-	if cfg.Serve.Enabled {
-		roles = append(roles, "serve")
+	a.Status = api.StatusRevoked
+	a.RevokedAt = time.Now().UTC()
+	refreshEffective(snap, a)
+	for i := range snap.Tokens {
+		if snap.Tokens[i].AgentID == a.ID {
+			snap.Tokens[i].Revoked = true
+		}
 	}
-	if cfg.Egress.Enabled {
-		roles = append(roles, "egress")
+	for i := range snap.EgressRoutes {
+		if r := &snap.EgressRoutes[i]; r.AgentID == a.ID && r.Enabled {
+			r.Enabled = false
+			auditDetail(snap, actorID, "egress_route.enabled", r.ID, "disabled: exit agent revoked")
+		}
 	}
-	return roles
+	auditDetail(snap, actorID, "agent.revoke", a.ID, reason)
 }
+func revokeEnrollmentKey(snap *types.Snapshot, k *types.EnrollmentKey) {
+	k.Revoked = true
+	for i := range snap.Tokens {
+		if snap.Tokens[i].Kind == "enrollment" && snap.Tokens[i].ID == k.ID {
+			snap.Tokens[i].Revoked = true
+		}
+	}
+}
+
 func (s *State) CreateEnrollmentKey(actorID string, key types.EnrollmentKey) (types.EnrollmentKey, string, error) {
 	plain := randomToken()
 	err := s.mutate(func(snap *types.Snapshot) error {
@@ -664,7 +728,7 @@ func (s *State) CreateEnrollmentKey(actorID string, key types.EnrollmentKey) (ty
 		if key.UserID != actorID && !manager {
 			return problem(types.KindForbidden, "cannot enroll for another user")
 		}
-		if _, err := requireUser(snap, key.UserID); err != nil {
+		if _, err := requireTargetUser(snap, key.UserID); err != nil {
 			return err
 		}
 		owner := member(snap, w.ID, key.UserID)
@@ -676,16 +740,13 @@ func (s *State) CreateEnrollmentKey(actorID string, key types.EnrollmentKey) (ty
 		}
 		seen := map[string]bool{}
 		for _, role := range key.Roles {
-			if !slices.Contains([]string{"ingress", "serve", "egress"}, role) || seen[role] {
+			if !slices.Contains([]string{api.RoleIngress, api.RoleServe, api.RoleEgress}, role) || seen[role] {
 				return problem(types.KindInvalid, "invalid or duplicate enrollment role")
 			}
 			seen[role] = true
-			if owner.Role == "guest" && role != "ingress" {
+			if owner.Role == "guest" && role != api.RoleIngress {
 				return problem(types.KindForbidden, "guests can only enroll ingress")
 			}
-		}
-		if key.AutoApprove && !manager {
-			return problem(types.KindForbidden, "auto-approval requires a workspace manager")
 		}
 		if key.MaxUses == 0 {
 			key.MaxUses = 1
@@ -716,24 +777,166 @@ func (s *State) CreateEnrollmentKey(actorID string, key types.EnrollmentKey) (ty
 	return key, plain, err
 }
 
-func nameTaken(snap *types.Snapshot, workspaceID, name string) bool {
-	for _, a := range snap.Agents {
-		if a.WorkspaceID == workspaceID && a.Name == name {
-			return true
+// claimLabel reserves one DNS label in a Workspace namespace shared by Agents
+// and services. A revoked Agent's labels are reclaimable at once by the same
+// User and by anyone else after NameTombstoneTTL; reclaiming purges the revoked
+// holder, so stale grants and routes can never attach to the new owner.
+func claimLabel(snap *types.Snapshot, workspaceID, name, userID, actorID string) error {
+	now := time.Now()
+	releasable := func(a *types.Agent) bool {
+		return a != nil && a.Status == api.StatusRevoked && (a.UserID == userID || !now.Before(a.RevokedAt.Add(NameTombstoneTTL)))
+	}
+	for i := range snap.Agents {
+		if a := &snap.Agents[i]; a.WorkspaceID == workspaceID && a.Name == name {
+			if !releasable(a) {
+				return problem(types.KindConflict, "name already reserved")
+			}
+			purgeAgent(snap, a.ID, actorID)
+			break
 		}
 	}
-	for _, v := range snap.Services {
-		if v.WorkspaceID == workspaceID && v.Name == name {
-			return true
+	for i := range snap.Services {
+		if v := snap.Services[i]; v.WorkspaceID == workspaceID && v.Name == name {
+			if !releasable(agent(snap, v.AgentID)) {
+				return problem(types.KindConflict, "name already reserved")
+			}
+			purgeService(snap, v.ID)
+			auditDetail(snap, actorID, "service.purge", v.ID, "name reclaimed: "+name)
+			break
 		}
 	}
-	return false
+	return nil
 }
+func purgeAgent(snap *types.Snapshot, id, actorID string) {
+	for _, v := range slices.Clone(snap.Services) {
+		if v.AgentID == id {
+			purgeService(snap, v.ID)
+		}
+	}
+	routes := map[string]bool{}
+	for _, r := range snap.EgressRoutes {
+		if r.AgentID == id {
+			routes[r.ID] = true
+		}
+	}
+	snap.Grants = slices.DeleteFunc(snap.Grants, func(g types.Grant) bool { return g.ResourceType == "egress" && routes[g.ResourceID] })
+	snap.EgressRoutes = slices.DeleteFunc(snap.EgressRoutes, func(r types.EgressRoute) bool { return routes[r.ID] })
+	snap.Tokens = slices.DeleteFunc(snap.Tokens, func(t types.Token) bool { return t.AgentID == id })
+	snap.Agents = slices.DeleteFunc(snap.Agents, func(a types.Agent) bool { return a.ID == id })
+	audit(snap, actorID, "agent.purge", id)
+}
+func purgeService(snap *types.Snapshot, id string) {
+	snap.Grants = slices.DeleteFunc(snap.Grants, func(g types.Grant) bool { return g.ResourceType == "service" && g.ResourceID == id })
+	snap.Services = slices.DeleteFunc(snap.Services, func(v types.Service) bool { return v.ID == id })
+}
+
+// roleCeiling is the enrollment role ceiling narrowed by the current
+// Workspace role: guests may only run ingress.
+func roleCeiling(snap *types.Snapshot, a *types.Agent) []string {
+	m := member(snap, a.WorkspaceID, a.UserID)
+	if m == nil {
+		return nil
+	}
+	if m.Role == "guest" {
+		if slices.Contains(a.Roles, api.RoleIngress) {
+			return []string{api.RoleIngress}
+		}
+		return nil
+	}
+	return slices.Clone(a.Roles)
+}
+
+// checkDesired is the automatic admission policy for a desired spec. It never
+// queues anything for a person: a spec is accepted as a whole or rejected.
+func checkDesired(snap *types.Snapshot, a *types.Agent, desired api.AgentSpec) error {
+	ceiling := roleCeiling(snap, a)
+	for _, role := range desired.Roles() {
+		if !slices.Contains(ceiling, role) {
+			return problem(types.KindForbidden, "desired role "+role+" exceeds the enrollment key or workspace role")
+		}
+	}
+	return nil
+}
+
+// computeEffective = Desired ∩ role ceiling ∩ built-in Workspace policy. A
+// revoked or principal-less Agent has an empty effective configuration.
+func computeEffective(snap *types.Snapshot, a *types.Agent) api.EffectiveConfig {
+	e := api.EffectiveConfig{Policy: PolicyVersion}
+	if !agentAllowed(snap, a) {
+		return e
+	}
+	ceiling := roleCeiling(snap, a)
+	e.Ingress = a.Desired.Ingress.Enabled && slices.Contains(ceiling, api.RoleIngress)
+	if a.Desired.Serve.Enabled && slices.Contains(ceiling, api.RoleServe) {
+		for _, desired := range a.Desired.Serve.Services {
+			for _, v := range snap.Services {
+				if v.AgentID == a.ID && v.Name == desired.Name {
+					e.Services = append(e.Services, api.EffectiveService{Name: v.Name, Origin: desired.Origin, Hostname: v.Hostname})
+				}
+			}
+		}
+	}
+	if a.Desired.Egress.Enabled && slices.Contains(ceiling, api.RoleEgress) {
+		e.Egress, e.Deny = api.CloneRules(a.Desired.Egress.Allow), api.CloneRules(a.Desired.Egress.Deny)
+	}
+	return e
+}
+
+const policyRejectionPrefix = "current policy excludes desired roles: "
+
+// refreshEffective recomputes the effective configuration, advancing the
+// per-Agent revision only when content changes. Desired roles the current
+// ceiling drops (after a demotion, or from a migrated pending request) are
+// reported as a rejection instead of waiting for anyone.
+func refreshEffective(snap *types.Snapshot, a *types.Agent) {
+	next := computeEffective(snap, a)
+	if a.Effective.Revision == 0 || !a.Effective.SameContent(next) {
+		next.Revision = a.Effective.Revision + 1
+		a.Effective = next
+	}
+	var dropped []string
+	if a.Status == api.StatusActive {
+		ceiling := roleCeiling(snap, a)
+		for _, role := range a.Desired.Roles() {
+			if !slices.Contains(ceiling, role) {
+				dropped = append(dropped, role)
+			}
+		}
+	}
+	message := policyRejectionPrefix + strings.Join(dropped, ", ")
+	switch {
+	case len(dropped) > 0 && (a.LastRejection == nil || a.LastRejection.Message != message):
+		a.LastRejection = &api.ConfigRejection{At: time.Now().UTC(), Kind: string(types.KindForbidden), Message: message}
+	case len(dropped) == 0 && a.LastRejection != nil && strings.HasPrefix(a.LastRejection.Message, policyRejectionPrefix):
+		a.LastRejection = nil
+	}
+}
+
+// reconcileAgents makes stored status and effective configuration consistent
+// with the current principals, e.g. after migrating the removed approval model.
+func reconcileAgents(snap *types.Snapshot) {
+	for i := range snap.Agents {
+		a := &snap.Agents[i]
+		if a.Status != api.StatusRevoked && a.Status != api.StatusActive {
+			a.Status = api.StatusActive
+		}
+		if a.Status == api.StatusActive && !agentAllowed(snap, a) {
+			revokeAgent(snap, a, "system", "principal inactive at reconciliation")
+			continue
+		}
+		refreshEffective(snap, a)
+	}
+}
+
 func (s *State) Enroll(request types.EnrollRequest) (types.EnrollResponse, error) {
 	var response types.EnrollResponse
-	cfg, err := validateDesired(request.Config)
+	name, err := label(request.Name)
 	if err != nil {
 		return response, err
+	}
+	desired := request.Desired.Clone()
+	if err := desired.Normalize(name); err != nil {
+		return response, problem(types.KindInvalid, "invalid desired configuration: "+err.Error())
 	}
 	controlToken, providerToken, accessToken := randomToken(), randomToken(), randomToken()
 	err = s.mutate(func(snap *types.Snapshot) error {
@@ -753,51 +956,43 @@ func (s *State) Enroll(request types.EnrollRequest) (types.EnrollResponse, error
 		if key == nil || key.Revoked || key.Uses >= key.MaxUses || !key.ExpiresAt.After(time.Now()) {
 			return problem(types.KindForbidden, "enrollment key unavailable")
 		}
-		if _, err := requireUser(snap, key.UserID); err != nil {
-			return err
+		if _, err := requireTargetUser(snap, key.UserID); err != nil {
+			return problem(types.KindForbidden, "enrollment owner is unavailable")
 		}
-		m := member(snap, key.WorkspaceID, key.UserID)
-		if m == nil {
+		if member(snap, key.WorkspaceID, key.UserID) == nil {
 			return problem(types.KindForbidden, "enrollment owner is no longer a member")
 		}
 		w := workspace(snap, key.WorkspaceID)
-		if w == nil || cfg.Workspace != w.Name {
+		if w == nil || request.Workspace != w.Name {
 			return problem(types.KindForbidden, "enrollment key belongs to a different workspace")
 		}
-		roles := declaredRoles(cfg)
-		for _, role := range roles {
-			if !slices.Contains(key.Roles, role) || (m.Role == "guest" && role != "ingress") {
-				return problem(types.KindForbidden, "enrollment role exceeds key permissions")
-			}
-		}
-		if nameTaken(snap, w.ID, cfg.Agent.Name) {
-			return problem(types.KindConflict, "agent name already reserved")
-		}
-		a := types.Agent{ID: randomID(), WorkspaceID: w.ID, Workspace: w.Name, UserID: key.UserID, Name: cfg.Agent.Name, Status: "pending", Desired: cfg, Roles: slices.Clone(key.Roles), PendingApproval: true, CreatedAt: time.Now().UTC(), Approval: credentials.Approval{Revision: snap.Revision + 1, ExpiresAt: time.Now().Add(ApprovalTTL)}}
-		if err := s.ensureServices(snap, &a); err != nil {
+		a := types.Agent{ID: randomID(), WorkspaceID: w.ID, UserID: key.UserID, Name: name, Status: api.StatusActive, Desired: desired, Roles: slices.Clone(key.Roles), CreatedAt: time.Now().UTC()}
+		if err := checkDesired(snap, &a, desired); err != nil {
 			return err
 		}
-		key.Uses++
-		snap.Agents = append(snap.Agents, a)
-		ap := &snap.Agents[len(snap.Agents)-1]
-		if key.AutoApprove {
-			if err := s.approve(snap, ap); err != nil {
-				return err
-			}
+		if err := claimLabel(snap, w.ID, name, a.UserID, a.UserID); err != nil {
+			return err
 		}
+		snap.Agents = append(snap.Agents, a)
+		if err := s.ensureServices(snap, a.ID); err != nil {
+			return err
+		}
+		ap := agent(snap, a.ID)
+		refreshEffective(snap, ap)
+		key.Uses++
 		expiry := time.Now().Add(TokenTTL)
 		snap.Tokens = append(snap.Tokens, tokenRecord("control", controlToken, a.UserID, w.ID, a.ID, expiry))
-		creds := credentials.Credentials{Version: 1, Workspace: w.Name, AgentID: a.ID, ControlToken: controlToken}
-		if slices.Contains(a.Roles, "serve") || slices.Contains(a.Roles, "egress") {
+		creds := api.Credentials{Version: api.CredentialsVersion, Workspace: w.Name, AgentID: a.ID, ControlToken: controlToken}
+		if slices.Contains(a.Roles, api.RoleServe) || slices.Contains(a.Roles, api.RoleEgress) {
 			snap.Tokens = append(snap.Tokens, tokenRecord("provider", providerToken, a.UserID, w.ID, a.ID, expiry))
 			creds.ProviderToken = providerToken
 		}
-		if slices.Contains(a.Roles, "ingress") {
+		if slices.Contains(a.Roles, api.RoleIngress) {
 			snap.Tokens = append(snap.Tokens, tokenRecord("access", accessToken, a.UserID, w.ID, a.ID, expiry))
 			creds.AccessToken = accessToken
 		}
 		view := agentView(snap, *ap)
-		creds.Approval = view.Approval
+		creds.Effective = view.Effective
 		response = types.EnrollResponse{Agent: view, Credentials: creds}
 		audit(snap, a.UserID, "agent.enroll", a.ID)
 		return nil
@@ -805,10 +1000,17 @@ func (s *State) Enroll(request types.EnrollRequest) (types.EnrollResponse, error
 	return response, err
 }
 
-func (s *State) ensureServices(snap *types.Snapshot, a *types.Agent) error {
+// ensureServices reserves a service record for every desired service. A newly
+// published service receives the Workspace default member grant once; later
+// changes to that grant are explicit grant management, never recreated here.
+// Reclaiming a name can purge other Agents, so it takes an ID: callers must not
+// hold pointers into snap.Agents across this call.
+func (s *State) ensureServices(snap *types.Snapshot, agentID string) error {
+	a := *agent(snap, agentID)
 	if !a.Desired.Serve.Enabled {
 		return nil
 	}
+	w := workspace(snap, a.WorkspaceID)
 	for _, desired := range a.Desired.Serve.Services {
 		found := false
 		for _, v := range snap.Services {
@@ -819,218 +1021,85 @@ func (s *State) ensureServices(snap *types.Snapshot, a *types.Agent) error {
 		if found {
 			continue
 		}
-		if desired.Name == a.Name || nameTaken(snap, a.WorkspaceID, desired.Name) {
+		if desired.Name == a.Name {
 			return problem(types.KindConflict, "service name already reserved")
 		}
-		snap.Services = append(snap.Services, types.Service{ID: randomID(), WorkspaceID: a.WorkspaceID, AgentID: a.ID, Name: desired.Name, Hostname: desired.Name + "." + a.Workspace + "." + s.baseDomain, Enabled: true})
+		if err := claimLabel(snap, a.WorkspaceID, desired.Name, a.UserID, a.UserID); err != nil {
+			return problem(types.KindConflict, "service name already reserved")
+		}
+		v := types.Service{ID: randomID(), WorkspaceID: a.WorkspaceID, AgentID: a.ID, Name: desired.Name, Hostname: desired.Name + "." + w.Name + "." + s.baseDomain, Enabled: true}
+		snap.Services = append(snap.Services, v)
+		now := time.Now().UTC()
+		snap.Grants = append(snap.Grants, types.Grant{ID: randomID(), WorkspaceID: a.WorkspaceID, ResourceType: "service", ResourceID: v.ID, SubjectType: "workspace", SubjectID: a.WorkspaceID,
+			StartsAt: now, ExpiresAt: now.Add(s.serviceGrantTTL), CreatedBy: defaultGrantCreator})
+		audit(snap, a.UserID, "service.publish", v.ID)
 	}
 	return nil
 }
-func (s *State) approve(snap *types.Snapshot, a *types.Agent) error {
-	if !agentAllowed(snap, a) {
-		return problem(types.KindForbidden, "agent is revoked or its owner is inactive")
-	}
-	if member(snap, a.WorkspaceID, a.UserID).Role == "guest" && (a.Desired.Serve.Enabled || a.Desired.Egress.Enabled) {
-		return problem(types.KindForbidden, "guests cannot provide services or egress")
-	}
-	if err := s.ensureServices(snap, a); err != nil {
-		return err
-	}
-	a.Status = "active"
-	a.PendingApproval = false
-	a.Approval = credentials.Approval{Revision: snap.Revision + 1, ExpiresAt: time.Now().Add(ApprovalTTL), Services: map[string]string{}}
-	if a.Desired.Serve.Enabled {
-		for _, v := range a.Desired.Serve.Services {
-			a.Approval.Services[v.Name] = v.Origin
-		}
-	}
-	if a.Desired.Egress.Enabled {
-		a.Approval.Egress = slices.Clone(a.Desired.Egress.Allow)
-		a.Approval.Deny = slices.Clone(a.Desired.Egress.Deny)
-	}
-	for _, service := range snap.Services {
-		if service.AgentID != a.ID {
-			continue
-		}
-		_, approved := a.Approval.Services[service.Name]
-		if !approved {
-			continue
-		}
-		everGranted := false
-		for _, g := range snap.Grants {
-			if g.ResourceType == "service" && g.ResourceID == service.ID {
-				everGranted = true
-			}
-		}
-		if !everGranted {
-			snap.Grants = append(snap.Grants, types.Grant{ID: randomID(), WorkspaceID: a.WorkspaceID, ResourceType: "service", ResourceID: service.ID, SubjectType: "workspace", SubjectID: a.WorkspaceID, StartsAt: time.Now().UTC(), ExpiresAt: time.Now().Add(DefaultGrantTTL)})
-		}
-	}
-	return nil
-}
-func (s *State) ApproveAgent(actorID, agentID string) (types.Agent, error) {
-	return s.approveAgent(actorID, agentID, nil)
-}
 
-// ApproveAgentExpected binds an approval to the configuration the reviewer saw.
-// Comparison and approval share the same mutation lock and SQL transaction.
-func (s *State) ApproveAgentExpected(actorID, agentID string, expected config.Config) (types.Agent, error) {
-	return s.approveAgent(actorID, agentID, &expected)
+// agentView is the API projection: workspace name and the validity window of
+// the effective configuration are filled in at read time.
+func agentView(snap *types.Snapshot, a types.Agent) api.Agent {
+	v := api.Agent{ID: a.ID, WorkspaceID: a.WorkspaceID, UserID: a.UserID, Name: a.Name, Status: a.Status, Roles: slices.Clone(a.Roles),
+		Desired: a.Desired.Clone(), Effective: a.Effective.Clone(), CreatedAt: a.CreatedAt, RevokedAt: a.RevokedAt}
+	if v.Roles == nil {
+		v.Roles = []string{}
+	}
+	if w := workspace(snap, a.WorkspaceID); w != nil {
+		v.Workspace = w.Name
+	}
+	if a.LastRejection != nil {
+		rejection := *a.LastRejection
+		v.LastRejection = &rejection
+	}
+	if agentAllowed(snap, &a) {
+		v.Effective.ExpiresAt = time.Now().Add(EffectiveTTL).UTC()
+	}
+	return v
 }
-func (s *State) approveAgent(actorID, agentID string, expected *config.Config) (types.Agent, error) {
-	var out types.Agent
-	err := s.mutate(func(snap *types.Snapshot) error {
-		a := agent(snap, agentID)
-		if a == nil {
-			return problem(types.KindNotFound, "agent not found")
-		}
-		if err := requireManager(snap, actorID, a.WorkspaceID); err != nil {
-			return err
-		}
-		if !agentAllowed(snap, a) {
-			return problem(types.KindForbidden, "agent or owner is inactive")
-		}
-		if member(snap, a.WorkspaceID, a.UserID).Role == "guest" && (a.Desired.Serve.Enabled || a.Desired.Egress.Enabled) {
-			return problem(types.KindForbidden, "guests cannot provide services or egress")
-		}
-		if expected != nil && !reflect.DeepEqual(a.Desired, *expected) {
-			return problem(types.KindConflict, "agent desired configuration changed; reload before approving")
-		}
-		if a.Status == "active" && !a.PendingApproval {
-			out = agentView(snap, *a)
-			return nil
-		}
-		if err := s.approve(snap, a); err != nil {
-			return err
-		}
-		audit(snap, actorID, "agent.approve", agentID)
-		out = agentView(snap, *a)
-		return nil
-	})
-	if err != nil {
-		return types.Agent{}, err
-	}
-	return out, nil
-}
-
-func intersectRules(a, b []policy.Rule) []policy.Rule {
-	var out []policy.Rule
-	for _, x := range a {
-		for _, y := range b {
-			var d policy.Domain
-			switch {
-			case x.Domain.Exact != "":
-				if y.Domain.Exact == x.Domain.Exact || y.Domain.Suffix != "" && (x.Domain.Exact == y.Domain.Suffix || strings.HasSuffix(x.Domain.Exact, "."+y.Domain.Suffix)) {
-					d.Exact = x.Domain.Exact
-				}
-			case y.Domain.Exact != "":
-				if x.Domain.Suffix != "" && (y.Domain.Exact == x.Domain.Suffix || strings.HasSuffix(y.Domain.Exact, "."+x.Domain.Suffix)) {
-					d.Exact = y.Domain.Exact
-				}
-			default:
-				if x.Domain.Suffix == y.Domain.Suffix || strings.HasSuffix(x.Domain.Suffix, "."+y.Domain.Suffix) {
-					d.Suffix = x.Domain.Suffix
-				} else if strings.HasSuffix(y.Domain.Suffix, "."+x.Domain.Suffix) {
-					d.Suffix = y.Domain.Suffix
-				}
-			}
-			if d.Exact == "" && d.Suffix == "" {
-				continue
-			}
-			var ports []int
-			for _, p := range x.Ports {
-				if slices.Contains(y.Ports, p) {
-					ports = append(ports, p)
-				}
-			}
-			if len(ports) > 0 {
-				out = append(out, policy.Rule{Domain: d, Ports: ports, Protocol: "tls"})
-			}
-		}
-	}
-	return out
-}
-func agentView(snap *types.Snapshot, a types.Agent) types.Agent {
-	if !agentAllowed(snap, &a) {
-		a.Status = "revoked"
-	}
-	if a.Status != "active" || member(snap, a.WorkspaceID, a.UserID).Role == "guest" {
-		a.Approval = credentials.Approval{Revision: a.Approval.Revision, ExpiresAt: time.Now().Add(ApprovalTTL)}
-		return a
-	}
-	approved := a.Approval
-	a.Approval.Services = map[string]string{}
-	if a.Desired.Serve.Enabled {
-		for _, service := range a.Desired.Serve.Services {
-			if approved.Services[service.Name] == service.Origin {
-				a.Approval.Services[service.Name] = service.Origin
-			}
-		}
-	}
-	a.Approval.Egress = nil
-	a.Approval.Deny = nil
-	if a.Desired.Egress.Enabled {
-		a.Approval.Egress = intersectRules(approved.Egress, a.Desired.Egress.Allow)
-		a.Approval.Deny = append(slices.Clone(approved.Deny), a.Desired.Egress.Deny...)
-	}
-	a.Approval.ExpiresAt = time.Now().Add(ApprovalTTL)
-	return a
-}
-func (s *State) Agent(id string) (types.Agent, error) {
+func (s *State) Agent(id string) (api.Agent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	snap, err := clone(s.snapshot)
-	if err != nil {
-		return types.Agent{}, err
-	}
-	a := agent(&snap, id)
+	a := agent(&s.snapshot, id)
 	if a == nil {
-		return types.Agent{}, problem(types.KindNotFound, "agent not found")
+		return api.Agent{}, problem(types.KindNotFound, "agent not found")
 	}
-	return agentView(&snap, *a), nil
+	return agentView(&s.snapshot, *a), nil
 }
 
 // AgentViews projects a bounded set of already-authorized device references
-// against one detached snapshot. Callers must scope IDs before invoking it.
-func (s *State) AgentViews(ids []string) (map[string]types.Agent, error) {
+// against one snapshot. Callers must scope IDs before invoking it.
+func (s *State) AgentViews(ids []string) (map[string]api.Agent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	snap, err := clone(s.snapshot)
-	if err != nil {
-		return nil, err
-	}
 	wanted := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		wanted[id] = true
 	}
-	out := make(map[string]types.Agent, len(wanted))
-	for _, a := range snap.Agents {
+	out := make(map[string]api.Agent, len(wanted))
+	for _, a := range s.snapshot.Agents {
 		if wanted[a.ID] {
-			out[a.ID] = agentView(&snap, a)
+			out[a.ID] = agentView(&s.snapshot, a)
 		}
 	}
 	return out, nil
 }
 
-func (s *State) GetAgentCredentials(controlToken string) (credentials.Credentials, error) {
+func (s *State) GetAgentCredentials(controlToken string) (api.Credentials, error) {
 	if err := s.renewAgentTokens(controlToken); err != nil {
-		return credentials.Credentials{}, err
+		return api.Credentials{}, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	id, err := identity(&s.snapshot, controlToken)
 	if err != nil {
-		return credentials.Credentials{}, err
+		return api.Credentials{}, err
 	}
 	if id.Kind != "control" {
-		return credentials.Credentials{}, problem(types.KindUnauthorized, "agent control token required")
+		return api.Credentials{}, problem(types.KindUnauthorized, "agent control token required")
 	}
-	snap, err := clone(s.snapshot)
-	if err != nil {
-		return credentials.Credentials{}, err
-	}
-	a := agentView(&snap, *agent(&snap, id.AgentID))
-	return credentials.Credentials{Version: 1, Workspace: a.Workspace, AgentID: a.ID, Approval: a.Approval}, nil
+	a := agentView(&s.snapshot, *agent(&s.snapshot, id.AgentID))
+	return api.Credentials{Version: api.CredentialsVersion, Workspace: a.Workspace, AgentID: a.ID, Effective: a.Effective}, nil
 }
 
 func agentTokensNeedRenewal(snap *types.Snapshot, agentID string, now time.Time) bool {
@@ -1118,13 +1187,15 @@ func (s *State) RotateUserToken(actorID, userID string) (string, error) {
 	}
 	return plain, nil
 }
-func (s *State) UpdateAgent(controlToken string, cfg config.Config) (types.Agent, error) {
-	next, err := validateDesired(cfg)
-	if err != nil {
-		return types.Agent{}, err
-	}
+
+// UpdateAgent automatically validates and applies a device's desired spec.
+// Invalid (400), forbidden (403) and conflicting (409) specs are rejected as a
+// whole; the previous effective configuration keeps running and the rejection
+// is recorded for operators. Nothing waits for manual approval.
+func (s *State) UpdateAgent(controlToken string, update api.ConfigUpdate) (api.Agent, error) {
+	desired := update.Desired.Clone()
 	var id string
-	err = s.mutate(func(snap *types.Snapshot) error {
+	err := s.mutate(func(snap *types.Snapshot) error {
 		ident, err := identity(snap, controlToken)
 		if err != nil {
 			return err
@@ -1133,34 +1204,48 @@ func (s *State) UpdateAgent(controlToken string, cfg config.Config) (types.Agent
 			return problem(types.KindUnauthorized, "agent control token required")
 		}
 		a := agent(snap, ident.AgentID)
-		if next.Workspace != a.Workspace || next.Agent.Name != a.Name {
+		if update.Workspace != ident.Workspace || update.Name != a.Name {
 			return problem(types.KindForbidden, "cannot switch registered workspace or name")
 		}
-		if next.Instance != a.Desired.Instance || next.Transport.Endpoint != a.Desired.Transport.Endpoint {
-			return problem(types.KindForbidden, "registered control and Edge origins cannot change")
-		}
-		m := member(snap, a.WorkspaceID, a.UserID)
-		for _, role := range declaredRoles(next) {
-			if !slices.Contains(a.Roles, role) || (m.Role == "guest" && role != "ingress") {
-				return problem(types.KindForbidden, "desired role exceeds enrollment permission")
-			}
-		}
 		id = a.ID
-		if reflect.DeepEqual(a.Desired, next) {
-			return nil
+		if err := desired.Normalize(a.Name); err != nil {
+			return problem(types.KindInvalid, "invalid desired configuration: "+err.Error())
 		}
-		a.Desired = next
-		a.PendingApproval = true
-		if err := s.ensureServices(snap, a); err != nil {
+		if err := checkDesired(snap, a, desired); err != nil {
 			return err
 		}
-		audit(snap, a.UserID, "agent.desired", a.ID)
+		if reflect.DeepEqual(a.Desired, desired) && (a.LastRejection == nil || strings.HasPrefix(a.LastRejection.Message, policyRejectionPrefix)) {
+			return nil
+		}
+		a.Desired, a.LastRejection = desired, nil
+		if err := s.ensureServices(snap, a.ID); err != nil {
+			return err
+		}
+		a = agent(snap, id)
+		refreshEffective(snap, a)
+		audit(snap, a.UserID, "agent.desired.apply", a.ID)
 		return nil
 	})
 	if err != nil {
-		return types.Agent{}, err
+		if kind := types.ErrorKind(types.KindOf(err)); id != "" && (kind == types.KindInvalid || kind == types.KindForbidden || kind == types.KindConflict) {
+			s.recordRejection(id, kind, err.Error())
+		}
+		return api.Agent{}, err
 	}
 	return s.Agent(id)
+}
+
+// recordRejection is best effort: the device already received the error.
+func (s *State) recordRejection(agentID string, kind types.ErrorKind, message string) {
+	_ = s.mutate(func(snap *types.Snapshot) error {
+		a := agent(snap, agentID)
+		if a == nil || (a.LastRejection != nil && a.LastRejection.Kind == string(kind) && a.LastRejection.Message == message) {
+			return nil
+		}
+		a.LastRejection = &api.ConfigRejection{At: time.Now().UTC(), Kind: string(kind), Message: message}
+		auditDetail(snap, a.UserID, "agent.desired.reject", a.ID, message)
+		return nil
+	})
 }
 
 // SnapshotForUser returns a detached, scoped view; token hashes never leave state.

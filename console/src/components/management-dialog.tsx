@@ -30,7 +30,6 @@ import {
   roleNames,
   rows,
   rule,
-  time,
 } from "@/lib/model";
 
 export type Secret = {
@@ -112,9 +111,8 @@ export function ManagementDialog({
     [userID, setUserID] = useState(""),
     [role, setRole] = useState<Membership["role"]>("developer");
   const [roles, setRoles] = useState<Array<"ingress" | "serve" | "egress">>([
-      "ingress",
-    ]),
-    [autoApprove, setAutoApprove] = useState(false);
+    "ingress",
+  ]);
   const [uses, setUses] = useState("1"),
     [expires, setExpires] = useState(localTime(24)),
     [starts, setStarts] = useState(localTime());
@@ -147,7 +145,7 @@ export function ManagementDialog({
     (a) =>
       a.workspaceId === workspaceID &&
       a.status === "active" &&
-      a.desired.egress.enabled,
+      (a.effective.egress ?? []).length > 0,
   );
   const targets = [
     ...data.services
@@ -173,8 +171,7 @@ export function ManagementDialog({
   }, [workspaceID, kind, user.id]);
   useEffect(() => {
     if (guest) setRoles(["ingress"]);
-    if (!manager) setAutoApprove(false);
-  }, [guest, manager]);
+  }, [guest]);
   useEffect(() => {
     if (localSubjects && subjectType === "anonymous") setSubjectType("user");
   }, [localSubjects, subjectType]);
@@ -238,7 +235,6 @@ export function ManagementDialog({
         const body = {
           userId: userID,
           roles,
-          autoApprove: manager && autoApprove,
           maxUses: Number(uses),
           expiresAt: new Date(expires).toISOString(),
         };
@@ -530,19 +526,9 @@ export function ManagementDialog({
                   />
                 </Field>
               </div>
-              <Field label="批准方式">
-                <label className="checkbox-label">
-                  <Checkbox
-                    checked={autoApprove}
-                    disabled={!manager}
-                    onCheckedChange={(v) => setAutoApprove(v)}
-                  />
-                  自动批准声明范围内的能力
-                </label>
-                <p className="field-hint">
-                  不勾选时，注册后需要管理员核对期望配置。
-                </p>
-              </Field>
+              <p className="field-hint">
+                注册无需人工审批：Control 按注册角色和成员角色自动校验设备声明，通过即生效，越权或冲突直接拒绝。
+              </p>
             </>
           )}
           {kind === "route" && (
@@ -559,8 +545,8 @@ export function ManagementDialog({
                   disabled={!workspaceID}
                   onSelect={(value) => {
                     const agent = value as unknown as Agent;
-                    if (!agent.desired.egress.enabled) {
-                      setError("此设备未声明出口能力，请选择出口提供方。");
+                    if (!(agent.effective.egress ?? []).length) {
+                      setError("此设备的生效配置没有出口能力，请选择出口提供方。");
                       return;
                     }
                     setState((s) => ({
@@ -573,14 +559,14 @@ export function ManagementDialog({
               </Field>
               {agentID && (
                 <Notice>
-                  本地声明：
+                  生效的出口范围：
                   {(
-                    eligibleAgents.find((a) => a.id === agentID)?.desired.egress
-                      .allow ?? []
+                    eligibleAgents.find((a) => a.id === agentID)?.effective
+                      .egress ?? []
                   )
                     .map(rule)
                     .join("；") || "无允许目标"}
-                  。实际范围还需满足批准配置。
+                  。路由只能使用此范围内的目标。
                 </Notice>
               )}
               <Field label="规则名称" id="route-name">
@@ -850,9 +836,7 @@ export function ConfirmDialog({
 export function AgentDialog({
   agent,
   state,
-  user,
   onClose,
-  onComplete,
 }: {
   agent: Agent;
   state: State;
@@ -860,117 +844,76 @@ export function AgentDialog({
   onClose: () => void;
   onComplete: () => void;
 }) {
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const mayApprove =
-    (agent.status === "pending" || agent.pendingApproval) &&
-    canManage(state, user, agent.workspaceId);
+  const effective = agent.effective;
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open) onClose();
       }}
     >
-      <DialogContent className="management-dialog" showCloseButton={!busy}>
+      <DialogContent className="management-dialog">
         <DialogHeader>
-          <span className="eyebrow">AGENT CAPABILITIES</span>
-          <DialogTitle>
-            {mayApprove ? "审核 Agent 能力" : "Agent 详情"}
-          </DialogTitle>
+          <span className="eyebrow">AGENT CONFIGURATION</span>
+          <DialogTitle>Agent 详情</DialogTitle>
           <DialogDescription>
             {agent.name} · {name(state, "workspaces", agent.workspaceId)} ·{" "}
             {name(state, "users", agent.userId)}
           </DialogDescription>
         </DialogHeader>
         <Tags items={agentRoles(agent)} />
-        {agent.desired.serve.enabled && (
-          <section className="review-section">
-            <h3>本地服务</h3>
-            {(agent.desired.serve.services ?? []).map((s) => (
+        {agent.lastRejection && (
+          <Notice error>
+            最近一次配置更新被自动拒绝（{agent.lastRejection.kind}）：
+            {agent.lastRejection.message}。设备继续使用下方的生效配置。
+          </Notice>
+        )}
+        <section className="review-section">
+          <h3>生效的服务</h3>
+          {(effective.services ?? []).length ? (
+            (effective.services ?? []).map((s) => (
               <div className="review-item" key={s.name}>
                 <strong>{s.name}</strong>
-                <span>{s.origin}</span>
+                <span>
+                  {s.hostname} → {s.origin}
+                </span>
               </div>
-            ))}
-          </section>
-        )}
-        {agent.desired.egress.enabled && (
-          <section className="review-section">
-            <h3>允许的出口目标</h3>
-            {(agent.desired.egress.allow ?? []).length ? (
-              (agent.desired.egress.allow ?? []).map((r, i) => (
-                <div className="review-item" key={i}>
-                  {rule(r)}
-                </div>
-              ))
-            ) : (
-              <p className="text-xs text-muted-foreground">未声明允许目标</p>
-            )}
-            {(agent.desired.egress.deny ?? []).length > 0 && (
-              <>
-                <h3>明确拒绝</h3>
-                {(agent.desired.egress.deny ?? []).map((r, i) => (
-                  <div className="review-item text-destructive" key={i}>
-                    {rule(r)}
-                  </div>
-                ))}
-              </>
-            )}
-          </section>
-        )}
-        {agent.desired.ingress.enabled && (
-          <section className="review-section">
-            <h3>本机访问范围</h3>
-            {(agent.desired.ingress.routes ?? []).map((r, i) => (
+            ))
+          ) : (
+            <p className="text-xs text-muted-foreground">无</p>
+          )}
+        </section>
+        <section className="review-section">
+          <h3>生效的出口目标</h3>
+          {(effective.egress ?? []).length ? (
+            (effective.egress ?? []).map((r, i) => (
               <div className="review-item" key={i}>
                 {rule(r)}
               </div>
-            ))}
-          </section>
-        )}
+            ))
+          ) : (
+            <p className="text-xs text-muted-foreground">无</p>
+          )}
+          {(effective.deny ?? []).length > 0 && (
+            <>
+              <h3>明确拒绝</h3>
+              {(effective.deny ?? []).map((r, i) => (
+                <div className="review-item text-destructive" key={i}>
+                  {rule(r)}
+                </div>
+              ))}
+            </>
+          )}
+        </section>
         <p className="text-xs text-muted-foreground">
-          批准 Revision {agent.approval.revision} · 截止{" "}
-          {time(agent.approval.expiresAt, true)}
+          本机访问（ingress）：{effective.ingress ? "已生效" : "未生效"} ·
+          生效 Revision {effective.revision}
+          {effective.policy ? ` · 策略 ${effective.policy}` : ""}
         </p>
-        {error && <Notice error>{error}</Notice>}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={busy}>
+          <Button variant="outline" onClick={onClose}>
             关闭
           </Button>
-          {mayApprove && (
-            <Button
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  result(
-                    user.admin
-                      ? await sdk.putAdminAgentApproval({
-                          path: { id: agent.id },
-                          body: { expectedDesired: agent.desired },
-                          signal: requestSignal(),
-                        })
-                      : await sdk.putWorkspaceAgentApproval({
-                          path: {
-                            workspaceId: agent.workspaceId,
-                            agentId: agent.id,
-                          },
-                          body: { expectedDesired: agent.desired },
-                          signal: requestSignal(),
-                        }),
-                  );
-                  onComplete();
-                } catch (e) {
-                  setError(message(e));
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              {busy && <LoaderCircle className="animate-spin" />}批准声明的能力
-            </Button>
-          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -149,7 +149,7 @@ func TestIndependentProcessesServeEgressAndControlFailure(t *testing.T) {
 	t.Cleanup(originServer.Close)
 	agentCfg := h.agentConfig(w.Name, "provider")
 	agentCfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "stream", Origin: originServer.URL}}}
-	enrolled, _ := h.enroll(agentCfg, w, u, []string{"serve"}, true)
+	enrolled, _ := h.enroll(agentCfg, w, u, []string{"serve"})
 	h.runAgent(agentCfg, enrolled)
 	await(t, func() bool { return h.connected(enrolled.Agent.ID, "provider") })
 	stream, err := h.serveRequest(serviceHost("stream", w.Name), u.Token, "/")
@@ -186,7 +186,7 @@ func testSplitServiceSSO(t *testing.T, h *harness, client *http.Client) {
 	defer originServer.Close()
 	cfg := h.agentConfig(w.Name, "provider")
 	cfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "private", Origin: originServer.URL}}}
-	enrolled, _ := h.enroll(cfg, w, u, []string{"serve"}, true)
+	enrolled, _ := h.enroll(cfg, w, u, []string{"serve"})
 	stop := h.runAgent(cfg, enrolled)
 	defer stop()
 	await(t, func() bool { return h.connected(enrolled.Agent.ID, "provider") })

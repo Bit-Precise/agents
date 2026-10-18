@@ -64,14 +64,8 @@ export function resourceName(state: State, id: string) {
     ].find((item) => item.id === id)?.name || short(id)
   );
 }
-export function pending(agent: Agent) {
-  return agent.status === "pending" || agent.pendingApproval;
-}
 export function health(state: State, agent: Agent): Health {
   if (agent.status === "revoked") return { label: "已撤销", tone: "bad" };
-  if (agent.status === "pending") return { label: "待批准", tone: "warn" };
-  if (new Date(agent.approval.expiresAt) <= new Date())
-    return { label: "批准已过期", tone: "warn" };
   if (!state.edgeAvailable) return { label: "状态未知", tone: "muted" };
   return rows(state).connections.some((c) => c.agentId === agent.id)
     ? { label: "在线", tone: "good" }

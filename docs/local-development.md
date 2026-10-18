@@ -19,11 +19,11 @@ Windows 使用对应 `.exe`。默认控制台为 `http://localhost:8080/console/
 
 `init` 只输出文件位置，不显示 Token、不覆盖已有配置或密钥。只在自己的终端/编辑器中查看 Token 并登录，不把它放进 URL、命令参数、截图或工单。管理员不隐式绕过业务授权。
 
-在控制台创建 `demo` Workspace；创建者自动成为该 Workspace 的 owner。使用其他用户运行设备时，先将其加入成员列表。创建注册密钥，选择该用户及 `ingress/serve/egress`，先不勾自动批准，设定有限期限与一次使用。完整密钥仅展示一次，可下载为文件。
+在控制台创建 `demo` Workspace；创建者自动成为该 Workspace 的 owner。使用其他用户运行设备时，先将其加入成员列表。创建注册密钥，选择该用户及 `ingress/serve/egress`，设定有限期限与一次使用。注册没有人工审批步骤，密钥的角色就是该设备可启用角色的上限。完整密钥仅展示一次，可下载为文件。
 
 把下载内容保存为 `.run/state/agents/demo.enrollment.key`。该目录由 init 建立为私有目录。Linux/macOS 文件权限设为 0600；Windows 要求仅当前账号、SYSTEM/Administrators 的私有 DACL，不能靠 Unix chmod mode 替代。
 
-## 2. 注册、批准与运行 Agent
+## 2. 注册与运行 Agent
 
 另开终端启动源站：
 
@@ -44,17 +44,17 @@ chmod 600 .run/state/agents/demo.enrollment.key  # Linux/macOS
 
 Workspace 必须与注册密钥一致，instance/endpoint 必须与服务端 serverURL/edgeURL 一致。端口变化时两侧一起修改。
 
-在控制台审核 `local-agent` 声明的 `hello → http://127.0.0.1:8090` 和 `example.com:443` 出口范围，然后批准：
+Control 自动校验 `local-agent` 声明的 `hello → http://127.0.0.1:8090` 和 `example.com:443` 出口范围：在密钥角色与成员角色允许的范围内即生效，越权、非法配置或名称冲突会让 enroll 直接失败并给出原因。随后运行：
 
 ```sh
 ../agentd/bin/agentd run --config .run/agentd.yaml
 ```
 
-enroll 保存持久注册 ID 与独立控制/访问/提供方 Token 到 `.run/state/agentd/credentials.json`。重复注册不会覆盖现有身份。pending 不代表业务可用；首次联调先批准再 run。
+enroll 保存持久注册 ID、独立控制/访问/提供方 Token 及生效配置到 `.run/state/agentd/credentials.json`。重复注册不会覆盖现有身份；设备被撤销或凭据过期后，用 `agentd enroll --replace` 在 Control 确认旧凭据失效后重新注册。
 
 ## 3. 验证 Serve
 
-服务页面出现 `hello.demo.localhost`。首次批准新服务会创建有期限的本 Workspace 成员授权；已有服务授权不会因重载/重新批准而恢复默认全员。
+服务页面出现 `hello.demo.localhost`。新服务首次发布时创建有期限的本 Workspace 成员授权（默认 7 天，见 Control 配置 `serviceGrantTTL`）；之后不会因重载而恢复或延长。
 
 用浏览器打开控制台提供的服务链接并完成服务登录跳转，应看到 `hello through agents`。服务使用自己的 host-only 会话，中央控制台 Cookie 不发送到源站。
 
@@ -77,15 +77,15 @@ curl --noproxy '' --proxy http://127.0.0.1:8088 https://example.com/
 
 出口所在网络需能访问该网站，客户端继续验证网站原证书。创建路由、注册设备或打开 egress 都不会自动获得使用权。重定向到其他域名的新 TLS 连接仍需相应路由与授权。
 
-未匹配请求被拒绝；Edge 不会改选其他 Agent；provider 再次核对批准与本地范围。loopback/link-local/metadata 等地址默认禁止，不能靠 DNS 将获准域名改指本机任意服务。
+未匹配请求被拒绝；Edge 不会改选其他 Agent；provider 再次核对生效配置与本地范围。loopback/link-local/metadata 等地址默认禁止，不能靠 DNS 将获准域名改指本机任意服务。
 
 ## 5. 更新、撤销与生命周期
 
-- Linux/macOS 修改现有 provider 的 Serve/Egress 配置后发 SIGHUP。先收紧本地，再提交 desired；POST 失败会重试。Windows 修改后重启。监听、身份、transport 或最初未启动角色的变更需重启。
-- 扩权进入 `pendingApproval`，原先获准的交集可继续运行；管理员核对新配置后批准。局部收紧/撤销使用独立流取消，不靠杀死所有共享连接。
-- agentd 约每 2 秒刷新批准；认证 401/403 立即停止，连续网络失联超过约 30 秒或批准到期时停止角色。请求本身有超时，这些数值不是生产 SLO。
+- Linux/macOS 修改 Serve/Egress 配置或 ingress routes 后发 SIGHUP。先收紧本地，再提交 desired；网络失败会重试，400/403/409 拒绝不重试并记入设备的 `lastRejection`。Windows 修改后重启。监听、身份或 transport 的变更需重启，但不会阻止同次重载中的收紧。
+- 扩展在 Control 自动校验通过后立即生效，无需任何人批准；被拒时上一份生效配置继续运行。局部收紧/撤销使用独立流取消，生效配置 revision 变化也不会重建共享连接。
+- agentd 约每 2 秒刷新生效配置；凭据被拒（401）立即停止，Control 不可达时继续使用已同步配置至其 24 小时有效期结束。请求本身有超时，这些数值不是生产 SLO。
 - 每条流受授权、策略与会话期限约束；短租约续期重新授权，失败则关闭，还有流/会话硬上限。重连不迁移旧流、不重放业务。最终期限见 [Edge](../edge/README.md) 与 [connection](https://github.com/Bit-Precise/agentd/blob/main/connection/README.md)。
-- Token、注册密钥、授权各自有期限。在线 Agent 的 Token 剩余不足 7 天时可续为 30 天，保持 TokenID/hash，并不替换秘密。离线超过 30 天后需要新注册密钥、新名称/profile；原身份恢复尚未实现。
+- Token、注册密钥、授权各自有期限。在线 Agent 的 Token 剩余不足 7 天时可续为 30 天，保持 TokenID/hash，并不替换秘密。离线超过 30 天后用新注册密钥执行 `enroll --replace`；同一用户可沿用原名称，但旧注册不会复活。
 - 控制台用户页可更新本人 Token，管理员也可为其他用户重签。完整新 Token 仅展示一次，旧用户 Bearer 立即失效；已有浏览器会话仍按原到期时间生效。禁用用户与重签 Token 是不同操作。
 - agents 停止会关闭连接目录与活动流；重启恢复 SQL 中注册身份与策略，Agent 重新连接。浏览器内存会话需要重新登录。
 

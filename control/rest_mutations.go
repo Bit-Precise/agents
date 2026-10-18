@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/bit-precise/agentd/config"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agents/control/types"
 )
@@ -63,7 +62,6 @@ func (a *App) restCreate(resource string, admin bool) http.HandlerFunc {
 				WorkspaceID json.RawMessage `json:"workspaceId"`
 				UserID      string          `json:"userId"`
 				Roles       []string        `json:"roles"`
-				AutoApprove bool            `json:"autoApprove"`
 				MaxUses     int             `json:"maxUses"`
 				ExpiresAt   time.Time       `json:"expiresAt"`
 			}
@@ -75,7 +73,7 @@ func (a *App) restCreate(resource string, admin bool) http.HandlerFunc {
 				respond(w, nil, e, 201)
 				return
 			}
-			key, token, e := a.State.CreateEnrollmentKey(u.ID, types.EnrollmentKey{WorkspaceID: workspace, UserID: body.UserID, Roles: body.Roles, AutoApprove: body.AutoApprove, MaxUses: body.MaxUses, ExpiresAt: body.ExpiresAt})
+			key, token, e := a.State.CreateEnrollmentKey(u.ID, types.EnrollmentKey{WorkspaceID: workspace, UserID: body.UserID, Roles: body.Roles, MaxUses: body.MaxUses, ExpiresAt: body.ExpiresAt})
 			value = map[string]any{"key": key, "token": token}
 			id = key.ID
 			err = e
@@ -238,27 +236,6 @@ func (a *App) restUpdate(resource string, admin bool) http.HandlerFunc {
 				value = egressRouteView(route)
 			}
 		}
-		respond(w, value, err, 200)
-	})
-}
-func (a *App) restApprove(admin bool) http.HandlerFunc {
-	return a.restAuth(admin, func(w http.ResponseWriter, r *http.Request, u types.User) {
-		row, err := a.visibleResource(r, u, "agents")
-		if err != nil {
-			respond(w, nil, err, 200)
-			return
-		}
-		var body struct {
-			ExpectedDesired *config.Config `json:"expectedDesired"`
-		}
-		if !decode(w, r, &body) {
-			return
-		}
-		if body.ExpectedDesired == nil {
-			apiError(w, 400, "invalid", "expectedDesired is required")
-			return
-		}
-		value, err := a.State.ApproveAgentExpected(u.ID, row.id, *body.ExpectedDesired)
 		respond(w, value, err, 200)
 	})
 }

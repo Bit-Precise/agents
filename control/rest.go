@@ -210,8 +210,6 @@ func (a *App) registerREST() {
 	m.HandleFunc("PATCH /v1/admin/grants/{id}", a.restUpdate("grants", true))
 	m.HandleFunc("PATCH /v1/workspaces/{workspaceId}/grants/{grantId}", a.restUpdate("grants", false))
 	m.HandleFunc("POST /v1/admin/users/{id}/tokens", a.restToken)
-	m.HandleFunc("PUT /v1/admin/agents/{id}/approval", a.restApprove(true))
-	m.HandleFunc("PUT /v1/workspaces/{workspaceId}/agents/{agentId}/approval", a.restApprove(false))
 	m.HandleFunc("GET /v1/admin/workspaces/{workspaceId}/memberships/{userId}", a.restRead("memberships", true))
 	m.HandleFunc("PUT /v1/admin/workspaces/{workspaceId}/memberships/{userId}", a.restMembership(true))
 	m.HandleFunc("DELETE /v1/admin/workspaces/{workspaceId}/memberships/{userId}", a.restMembership(true))

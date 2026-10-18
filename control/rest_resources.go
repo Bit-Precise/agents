@@ -9,28 +9,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agents/control/types"
 	"github.com/bit-precise/agents/edge"
 )
 
-// AgentSummary deliberately excludes Desired and Approval: server catalogues
+// AgentSummary deliberately excludes Desired and Effective: server catalogues
 // are visible to workspace members who cannot read another device's origins.
 type AgentSummary struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Status          string   `json:"status"`
-	Roles           []string `json:"roles"`
-	PendingApproval bool     `json:"pendingApproval"`
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Status string   `json:"status"`
+	Roles  []string `json:"roles"`
 }
+
+// AgentRoleView reports one role of an Agent; Enabled means the role is in
+// the Agent's effective configuration, not merely requested.
 type AgentRoleView struct {
-	ID               string       `json:"id"`
-	WorkspaceID      string       `json:"workspaceId"`
-	AgentID          string       `json:"agentId"`
-	Agent            AgentSummary `json:"agent"`
-	Enabled          bool         `json:"enabled"`
-	ApprovedRevision uint64       `json:"approvedRevision"`
-	Status           string       `json:"status"`
+	ID                string       `json:"id"`
+	WorkspaceID       string       `json:"workspaceId"`
+	AgentID           string       `json:"agentId"`
+	Agent             AgentSummary `json:"agent"`
+	Enabled           bool         `json:"enabled"`
+	EffectiveRevision uint64       `json:"effectiveRevision"`
+	Status            string       `json:"status"`
 }
 type ServerView struct {
 	ID          string       `json:"id"`
@@ -63,14 +66,14 @@ type RouteView struct {
 	Priority    int       `json:"priority"`
 }
 
-func summarizeAgent(a types.Agent) AgentSummary {
+func summarizeAgent(a api.Agent) AgentSummary {
 	roles := slices.Clone(a.Roles)
 	if roles == nil {
 		roles = []string{}
 	}
-	return AgentSummary{a.ID, a.Name, a.Status, roles, a.PendingApproval}
+	return AgentSummary{a.ID, a.Name, a.Status, roles}
 }
-func (a *App) serverView(v types.Service, agents map[string]types.Agent) ServerView {
+func (a *App) serverView(v types.Service, agents map[string]api.Agent) ServerView {
 	agent, ok := agents[v.AgentID]
 	if !ok {
 		agent, _ = a.State.Agent(v.AgentID)
@@ -128,7 +131,7 @@ func (a *App) edgeSnapshot(r *http.Request) (edge.Snapshot, error) {
 }
 func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, resource string) ([]resourceRow, error) {
 	rows := []resourceRow{}
-	agents := map[string]types.Agent{}
+	agents := map[string]api.Agent{}
 	if resource == "agents" || resource == "ingresses" || resource == "egresses" || resource == "servers" {
 		// Only references from the caller's visible snapshot enter this projection;
 		// full projected configs are never serialized by role or server views.
@@ -170,7 +173,7 @@ func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, r
 			if !ok {
 				continue
 			}
-			rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"userId": v.UserID, "name": v.Name, "status": v.Status, "pendingApproval": boolKey(v.PendingApproval), "createdAt": timeKey(v.CreatedAt)}))
+			rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"userId": v.UserID, "name": v.Name, "status": v.Status, "createdAt": timeKey(v.CreatedAt)}))
 		}
 	case "ingresses", "egresses":
 		role := "ingress"
@@ -185,11 +188,11 @@ func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, r
 			if !slices.Contains(v.Roles, role) {
 				continue
 			}
-			enabled := v.Desired.Ingress.Enabled && v.Status != "revoked"
+			enabled := v.Status == api.StatusActive && v.Effective.Ingress
 			if role == "egress" {
-				enabled = v.Desired.Egress.Enabled && v.Status == "active" && len(v.Approval.Egress) > 0
+				enabled = v.Status == api.StatusActive && len(v.Effective.Egress) > 0
 			}
-			view := AgentRoleView{v.ID, v.WorkspaceID, v.ID, summarizeAgent(v), enabled, v.Approval.Revision, v.Status}
+			view := AgentRoleView{v.ID, v.WorkspaceID, v.ID, summarizeAgent(v), enabled, v.Effective.Revision, v.Status}
 			rows = append(rows, row(v.ID, v.WorkspaceID, view, map[string]string{"agentId": v.ID, "name": v.Name, "status": v.Status, "enabled": boolKey(enabled)}))
 		}
 	case "enrollment-keys":

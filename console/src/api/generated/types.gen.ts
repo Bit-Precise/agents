@@ -6,13 +6,12 @@ export type ClientOptions = {
 
 export type Error = {
     error: {
+        /**
+         * invalid, unauthorized, forbidden, not_found, conflict, expired, unavailable, internal; data-plane failures may also report origin or capacity.
+         */
         kind: string;
         message: string;
     };
-};
-
-export type Ok = {
-    ok: boolean;
 };
 
 export type User = {
@@ -46,77 +45,22 @@ export type Rule = {
     protocol: 'tls';
 };
 
-export type Listener = {
-    enabled: boolean;
-    listen: string;
-};
-
-export type AgentConfig = {
-    apiVersion: 'agents/v1alpha1';
-    kind: 'AgentConfig';
-    instance: string;
-    workspace: string;
-    agent: {
-        name: string;
-        stateDir: string;
-    };
-    transport: {
-        type: string;
-        endpoint: string;
-        mode: string;
-        caFile?: string;
-        allowHTTP?: boolean;
-    };
-    ingress: {
-        enabled: boolean;
-        http: Listener;
-        socks: Listener;
-        tun: {
-            enabled: boolean;
-            name: string;
-            dns: {
-                mode: string;
-            };
-        };
-        routes: Array<Rule> | null;
-        onUnmatched: 'reject';
-    };
-    serve: {
-        enabled: boolean;
-        services: Array<{
-            name: string;
-            origin: string;
-        }> | null;
-    };
-    egress: {
-        enabled: boolean;
-        allow: Array<Rule> | null;
-        deny: Array<Rule> | null;
-    };
-};
-
-export type Approval = {
-    revision: number;
-    expiresAt: string;
-    services?: {
-        [key: string]: string;
-    };
-    egress?: Array<Rule> | null;
-    deny?: Array<Rule> | null;
-};
-
 export type Agent = {
     id: string;
     workspaceId: string;
     workspace: string;
     userId: string;
     name: string;
-    status: 'pending' | 'active' | 'revoked';
-    desired: AgentConfig;
-    approval: Approval;
-    createdAt: string;
+    status: 'active' | 'revoked';
+    /**
+     * Enrollment role ceiling, not the enabled roles.
+     */
     roles: Array<'ingress' | 'serve' | 'egress'>;
-    pendingApproval: boolean;
+    desired: AgentSpec;
+    effective: EffectiveConfig;
+    lastRejection?: ConfigRejection;
+    createdAt: string;
+    revokedAt?: string;
 };
 
 export type EnrollmentKey = {
@@ -124,30 +68,10 @@ export type EnrollmentKey = {
     workspaceId: string;
     userId: string;
     roles: Array<'ingress' | 'serve' | 'egress'>;
-    autoApprove: boolean;
     uses: number;
     maxUses: number;
     expiresAt: string;
     revoked: boolean;
-};
-
-export type Service = {
-    id: string;
-    workspaceId: string;
-    agentId: string;
-    name: string;
-    hostname: string;
-    enabled: boolean;
-};
-
-export type EgressRoute = {
-    id: string;
-    workspaceId: string;
-    agentId: string;
-    name: string;
-    rule: Rule;
-    priority: number;
-    enabled: boolean;
 };
 
 export type Grant = {
@@ -160,6 +84,11 @@ export type Grant = {
     startsAt: string;
     expiresAt: string;
     revoked: boolean;
+    /**
+     * A manager authorized sharing beyond the resource Workspace; otherwise a user grant applies only while its subject is a member.
+     */
+    external: boolean;
+    createdBy?: string;
 };
 
 export type Audit = {
@@ -167,7 +96,7 @@ export type Audit = {
     actorId: string;
     action: string;
     resourceId: string;
-    detail: string;
+    detail?: string;
     at: string;
 };
 
@@ -238,19 +167,23 @@ export type CreatedEnrollmentKey = {
 };
 
 export type Credentials = {
-    version: number;
+    version: 2;
     workspace: string;
     agentId: string;
     providerToken?: string;
     accessToken?: string;
     controlToken?: string;
     controlUrl?: string;
-    approval: Approval;
+    effective: EffectiveConfig;
 };
 
 export type EnrollRequest = {
     enrollmentKey: string;
-    config: AgentConfig;
+    instance: string;
+    endpoint: string;
+    workspace: string;
+    name: string;
+    desired: AgentSpec;
 };
 
 export type EnrollResponse = {
@@ -269,20 +202,10 @@ export type CreateWorkspace = {
 
 export type CreateEnrollmentKey = {
     workspaceId: string;
-    userId: string;
+    userId?: string;
     roles: Array<'ingress' | 'serve' | 'egress'>;
-    autoApprove?: boolean;
-    maxUses: number;
-    expiresAt: string;
-};
-
-export type CreateEgressRoute = {
-    workspaceId: string;
-    agentId: string;
-    name: string;
-    rule: Rule;
-    priority: number;
-    enabled?: boolean;
+    maxUses?: number;
+    expiresAt?: string;
 };
 
 export type CreateGrant = {
@@ -291,7 +214,7 @@ export type CreateGrant = {
     resourceId: string;
     subjectType: 'user' | 'workspace' | 'anonymous';
     subjectId?: string;
-    startsAt: string;
+    startsAt?: string;
     expiresAt: string;
 };
 
@@ -319,20 +242,8 @@ export type UpdateAgent = {
     status: 'revoked';
 };
 
-export type PutAgentApproval = {
-    expectedDesired: AgentConfig;
-};
-
 export type UpdateEnrollmentKey = {
     revoked: true;
-};
-
-export type UpdateService = {
-    enabled: boolean;
-};
-
-export type UpdateEgressRoute = {
-    enabled: boolean;
 };
 
 export type UpdateGrant = {
@@ -364,16 +275,6 @@ export type EnrollmentKeysPage = {
     pagination: Pagination;
 };
 
-export type ServicesPage = {
-    items: Array<Service>;
-    pagination: Pagination;
-};
-
-export type EgressRoutesPage = {
-    items: Array<EgressRoute>;
-    pagination: Pagination;
-};
-
 export type GrantsPage = {
     items: Array<Grant>;
     pagination: Pagination;
@@ -397,21 +298,27 @@ export type AuditEventsPage = {
 export type IngressView = {
     agentId: string;
     agent: AgentSummary;
+    /**
+     * The role is in the Agent's effective configuration.
+     */
     enabled: boolean;
-    approvedRevision: number;
     status: string;
     id: string;
     workspaceId: string;
+    effectiveRevision: number;
 };
 
 export type EgressView = {
     agentId: string;
     agent: AgentSummary;
+    /**
+     * The role is in the Agent's effective configuration.
+     */
     enabled: boolean;
-    approvedRevision: number;
     status: string;
     id: string;
     workspaceId: string;
+    effectiveRevision: number;
 };
 
 export type ServerView = {
@@ -438,11 +345,6 @@ export type RouteView = {
     name: string;
 };
 
-export type WorkspaceAgentsPage = {
-    items: Array<Agent>;
-    pagination: Pagination;
-};
-
 export type WorkspaceIngressesPage = {
     items: Array<IngressView>;
     pagination: Pagination;
@@ -466,25 +368,15 @@ export type WorkspaceRoutesPage = {
 export type AgentSummary = {
     id: string;
     name: string;
-    status: 'pending' | 'active' | 'revoked';
+    status: 'active' | 'revoked';
     roles: Array<'ingress' | 'serve' | 'egress'>;
-    pendingApproval: boolean;
 };
 
 export type CreateWorkspaceEnrollmentKey = {
-    userId: string;
+    userId?: string;
     roles: Array<'ingress' | 'serve' | 'egress'>;
-    autoApprove?: boolean;
-    maxUses: number;
-    expiresAt: string;
-};
-
-export type CreateWorkspaceEgressRoute = {
-    agentId: string;
-    name: string;
-    rule: Rule;
-    priority: number;
-    enabled?: boolean;
+    maxUses?: number;
+    expiresAt?: string;
 };
 
 export type CreateWorkspaceGrant = {
@@ -492,7 +384,7 @@ export type CreateWorkspaceGrant = {
     resourceId: string;
     subjectType: 'user' | 'workspace' | 'anonymous';
     subjectId?: string;
-    startsAt: string;
+    startsAt?: string;
     expiresAt: string;
 };
 
@@ -535,6 +427,82 @@ export type CreateWorkspaceRoute = {
     rule: Rule;
     priority: number;
     kind: 'egress';
+};
+
+/**
+ * Server-relevant desired configuration derived from config.yaml. Local paths, listeners, transport details and ingress routes are never uploaded.
+ */
+export type AgentSpec = {
+    ingress: {
+        enabled: boolean;
+    };
+    serve: {
+        enabled: boolean;
+        services?: Array<ServiceSpec> | null;
+    };
+    egress: {
+        enabled: boolean;
+        allow?: Array<Rule> | null;
+        deny?: Array<Rule> | null;
+    };
+};
+
+export type ServiceSpec = {
+    name: string;
+    origin: string;
+};
+
+/**
+ * Desired ∩ role ceiling ∩ Workspace policy, computed automatically by Control. The revision advances only when the content changes; expiresAt bounds offline use by agentd.
+ */
+export type EffectiveConfig = {
+    revision: number;
+    policy?: string;
+    expiresAt?: string;
+    ingress: boolean;
+    services?: Array<EffectiveService> | null;
+    egress?: Array<Rule> | null;
+    deny?: Array<Rule> | null;
+};
+
+export type EffectiveService = {
+    name: string;
+    origin: string;
+    hostname: string;
+};
+
+/**
+ * The most recent desired update Control rejected; the previous effective configuration keeps running.
+ */
+export type ConfigRejection = {
+    at: string;
+    kind: string;
+    message: string;
+};
+
+export type ConfigUpdate = {
+    workspace: string;
+    name: string;
+    desired: AgentSpec;
+};
+
+export type Service = {
+    id: string;
+    workspaceId: string;
+    agentId: string;
+    name: string;
+    hostname: string;
+    enabled: boolean;
+};
+
+export type EgressRoute = {
+    id: string;
+    workspaceId: string;
+    agentId: string;
+    name: string;
+    rule: Rule;
+    priority: number;
+    enabled: boolean;
 };
 
 export type EnrollData = {
@@ -588,7 +556,7 @@ export type GetAgentCredentialsResponses = {
 export type GetAgentCredentialsResponse = GetAgentCredentialsResponses[keyof GetAgentCredentialsResponses];
 
 export type UpdateAgentConfigData = {
-    body: AgentConfig;
+    body: ConfigUpdate;
     headers?: {
         /**
          * Required together with same-origin Origin for cookie-authenticated mutations. Bearer clients do not need CSRF.
@@ -1181,7 +1149,6 @@ export type ListAdminAgentsData = {
         workspaceId?: string;
         userId?: string;
         status?: string;
-        pendingApproval?: boolean;
         q?: string;
     };
     url: '/v1/admin/agents';
@@ -1258,33 +1225,6 @@ export type UpdateAdminAgentResponses = {
 };
 
 export type UpdateAdminAgentResponse = UpdateAdminAgentResponses[keyof UpdateAdminAgentResponses];
-
-export type PutAdminAgentApprovalData = {
-    body: PutAgentApproval;
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/v1/admin/agents/{id}/approval';
-};
-
-export type PutAdminAgentApprovalErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type PutAdminAgentApprovalError = PutAdminAgentApprovalErrors[keyof PutAdminAgentApprovalErrors];
-
-export type PutAdminAgentApprovalResponses = {
-    /**
-     * Success
-     */
-    200: Agent;
-};
-
-export type PutAdminAgentApprovalResponse = PutAdminAgentApprovalResponses[keyof PutAdminAgentApprovalResponses];
 
 export type ListAdminEnrollmentKeysData = {
     body?: never;
@@ -1893,7 +1833,6 @@ export type ListWorkspaceAgentsData = {
         sortOrder?: 'asc' | 'desc';
         userId?: string;
         status?: string;
-        pendingApproval?: boolean;
         q?: string;
     };
     url: '/v1/workspaces/{workspaceId}/agents';
@@ -2384,34 +2323,6 @@ export type GetWorkspaceFlowResponses = {
 };
 
 export type GetWorkspaceFlowResponse = GetWorkspaceFlowResponses[keyof GetWorkspaceFlowResponses];
-
-export type PutWorkspaceAgentApprovalData = {
-    body: PutAgentApproval;
-    path: {
-        workspaceId: string;
-        agentId: string;
-    };
-    query?: never;
-    url: '/v1/workspaces/{workspaceId}/agents/{agentId}/approval';
-};
-
-export type PutWorkspaceAgentApprovalErrors = {
-    /**
-     * API error
-     */
-    default: Error;
-};
-
-export type PutWorkspaceAgentApprovalError = PutWorkspaceAgentApprovalErrors[keyof PutWorkspaceAgentApprovalErrors];
-
-export type PutWorkspaceAgentApprovalResponses = {
-    /**
-     * Success
-     */
-    200: Agent;
-};
-
-export type PutWorkspaceAgentApprovalResponse = PutWorkspaceAgentApprovalResponses[keyof PutWorkspaceAgentApprovalResponses];
 
 export type ListWorkspaceIngressesData = {
     body?: never;

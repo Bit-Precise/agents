@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bit-precise/agentd/config"
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agents/control/types"
 	jose "github.com/go-jose/go-jose/v4"
 )
@@ -362,12 +362,12 @@ func TestOIDCDiscoveryPKCEBrowserSessionSSOAndLogout(t *testing.T) {
 	if _, err = f.app.State.SetMembership(admin.UserID, workspace.ID, user.ID, "developer"); err != nil {
 		t.Fatal(err)
 	}
-	_, key, err := f.app.State.CreateEnrollmentKey(admin.UserID, types.EnrollmentKey{WorkspaceID: workspace.ID, UserID: user.ID, Roles: []string{"serve"}, MaxUses: 1, AutoApprove: true})
+	_, key, err := f.app.State.CreateEnrollmentKey(admin.UserID, types.EnrollmentKey{WorkspaceID: workspace.ID, UserID: user.ID, Roles: []string{"serve"}, MaxUses: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	desired := config.Config{APIVersion: "agents/v1alpha1", Kind: "AgentConfig", Instance: f.cfg.ServerURL, Workspace: "work", Agent: config.AgentConfig{Name: "provider", StateDir: "./state"}, Transport: config.TransportConfig{Type: "xhttp", Mode: "packet-up", Endpoint: f.cfg.EdgeURL, AllowHTTP: true}, Serve: config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: "http://127.0.0.1:3000"}}}, Ingress: config.IngressConfig{OnUnmatched: "reject"}}
-	if _, err = f.app.State.Enroll(types.EnrollRequest{EnrollmentKey: key, Config: desired}); err != nil {
+	desired := api.AgentSpec{Serve: api.ServeSpec{Enabled: true, Services: []api.ServiceSpec{{Name: "demo", Origin: "http://127.0.0.1:3000"}}}}
+	if _, err = f.app.State.Enroll(types.EnrollRequest{EnrollmentKey: key, Instance: f.cfg.ServerURL, Endpoint: f.cfg.EdgeURL, Workspace: "work", Name: "provider", Desired: desired}); err != nil {
 		t.Fatal(err)
 	}
 	serverURL, _ := url.Parse(f.cfg.ServerURL)

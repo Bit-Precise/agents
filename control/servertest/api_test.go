@@ -11,14 +11,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/config"
+	"github.com/bit-precise/agentd/controlclient"
 	"github.com/bit-precise/agentd/credentials"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agents/control/types"
 	"github.com/bit-precise/agents/edge"
 )
 
-func TestManualApprovalThroughHTTPAPIAndSupervisor(t *testing.T) {
+func TestAutomaticEnrollmentThroughHTTPAPIAndSupervisor(t *testing.T) {
 	h := newHarness(t)
 	w, u := h.workspace("workspace", "alice")
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,29 +32,20 @@ func TestManualApprovalThroughHTTPAPIAndSupervisor(t *testing.T) {
 	defer origin.Close()
 	cfg := h.agentConfig(w.Name, "provider")
 	cfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: origin.URL}}}
-	enrolled, client := h.enroll(cfg, w, u, []string{"serve"}, false)
-	if enrolled.Agent.Status != "pending" {
-		t.Fatal("manual enrollment did not remain pending")
+	enrolled, client := h.enroll(cfg, w, u, []string{"serve"})
+	if enrolled.Agent.Status != api.StatusActive || len(enrolled.Credentials.Effective.Services) != 1 || enrolled.Credentials.Effective.Services[0].Hostname != serviceHost("demo", w.Name) {
+		t.Fatalf("validated enrollment was not effective immediately: %+v", enrolled.Agent)
 	}
 	h.runAgent(cfg, enrolled)
-	response, err := h.serveRequest(serviceHost("demo", w.Name), u.Token, "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	readResponse(t, response, http.StatusForbidden)
-	if h.connected(enrolled.Agent.ID, "provider") {
-		t.Fatal("pending provider connected before approval")
-	}
-	h.api("PUT", "/v1/admin/agents/"+enrolled.Agent.ID+"/approval", adminToken, map[string]any{"expectedDesired": enrolled.Agent.Desired}, nil, 200)
 	await(t, func() bool { return h.connected(enrolled.Agent.ID, "provider") })
 	refreshed, err := client.Refresh(t.Context(), enrolled.Credentials)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refreshed.ProviderToken != enrolled.Credentials.ProviderToken || refreshed.Approval.Revision <= enrolled.Credentials.Approval.Revision {
-		t.Fatal("client did not merge secret with updated approval")
+	if refreshed.ProviderToken != enrolled.Credentials.ProviderToken || refreshed.Effective.Revision < enrolled.Credentials.Effective.Revision {
+		t.Fatal("client did not merge secret with the effective configuration")
 	}
-	response, err = h.serveRequest(serviceHost("demo", w.Name), u.Token, "/")
+	response, err := h.serveRequest(serviceHost("demo", w.Name), u.Token, "/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +57,17 @@ func TestManualApprovalThroughHTTPAPIAndSupervisor(t *testing.T) {
 		t.Fatal(err)
 	}
 	readResponse(t, response, 403)
+	// A desired update beyond the enrollment key is rejected outright and the
+	// running configuration stays effective.
+	cfg.Egress = config.EgressConfig{Enabled: true, Allow: []policy.Rule{tlsRule("example.com")}}
+	if _, err = client.Update(t.Context(), refreshed, cfg); !controlclient.Rejected(err) {
+		t.Fatalf("policy violation was not rejected: %v", err)
+	}
+	response, err = h.serveRequest(serviceHost("demo", w.Name), u.Token, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readResponse(t, response, 200)
 }
 
 func TestBrowserSessionCSRFAndDisabledUser(t *testing.T) {
@@ -155,12 +159,12 @@ func TestHTTPAPIPersistsRegistrationAcrossServerRestart(t *testing.T) {
 	w, u := h.workspace("workspace", "alice")
 	cfg := h.agentConfig(w.Name, "device")
 	cfg.Ingress = config.IngressConfig{Enabled: true, HTTP: config.ListenerConfig{Enabled: true, Listen: "127.0.0.1:18888"}, Routes: []policy.Rule{tlsRule("example.com")}, OnUnmatched: "reject"}
-	enrolled, _ := h.enroll(cfg, w, u, []string{"ingress"}, false)
+	enrolled, _ := h.enroll(cfg, w, u, []string{"ingress"})
 	address := h.cfg.ListenAddress
 	database := h.cfg.Database.DSN
 	h.close()
 	restarted := startHarness(t, database, address)
-	agents := readResourceList[types.Agent](restarted, "/v1/workspaces/"+w.ID+"/agents", u.Token)
+	agents := readResourceList[api.Agent](restarted, "/v1/workspaces/"+w.ID+"/agents", u.Token)
 	workspaces := readResourceList[types.Workspace](restarted, "/v1/workspaces", u.Token)
 	if len(agents) != 1 || agents[0].ID != enrolled.Agent.ID || len(workspaces) != 2 {
 		t.Fatal("server restart lost scoped resource state")
@@ -186,7 +190,7 @@ func TestResourceListsDoNotLeakOtherWorkspaceSessions(t *testing.T) {
 	enroll := func(w types.Workspace, u userCredential, name string) types.EnrollResponse {
 		cfg := h.agentConfig(w.Name, name)
 		cfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: origin.URL}}}
-		response, _ := h.enroll(cfg, w, u, []string{"serve"}, true)
+		response, _ := h.enroll(cfg, w, u, []string{"serve"})
 		h.runAgent(cfg, response)
 		return response
 	}
@@ -197,12 +201,12 @@ func TestResourceListsDoNotLeakOtherWorkspaceSessions(t *testing.T) {
 	})
 	view := struct {
 		Workspaces  []types.Workspace       `json:"workspaces"`
-		Agents      []types.Agent           `json:"agents"`
+		Agents      []api.Agent             `json:"agents"`
 		Connections []edge.ConnectionStatus `json:"connections"`
 		Flows       []edge.FlowStatus       `json:"flows"`
 	}{
 		Workspaces:  readResourceList[types.Workspace](h, "/v1/workspaces", alice.Token),
-		Agents:      readResourceList[types.Agent](h, "/v1/workspaces/"+w1.ID+"/agents", alice.Token),
+		Agents:      readResourceList[api.Agent](h, "/v1/workspaces/"+w1.ID+"/agents", alice.Token),
 		Connections: readResourceList[edge.ConnectionStatus](h, "/v1/workspaces/"+w1.ID+"/connections", alice.Token),
 		Flows:       readResourceList[edge.FlowStatus](h, "/v1/workspaces/"+w1.ID+"/flows", alice.Token),
 	}

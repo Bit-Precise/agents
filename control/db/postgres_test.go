@@ -58,7 +58,7 @@ func TestPostgresPersistenceAndConstraints(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	baseline := types.Snapshot{Revision: 1, Users: []types.User{{ID: "user", Name: "alice"}}, Workspaces: []types.Workspace{{ID: "w1", Name: "one"}, {ID: "w2", Name: "two"}}, Memberships: []types.Membership{{WorkspaceID: "w1", UserID: "user", Role: "owner"}}, Agents: []types.Agent{{ID: "agent", WorkspaceID: "w1", UserID: "user", Name: "provider"}}, Services: []types.Service{{ID: "service", WorkspaceID: "w1", AgentID: "agent", Name: "demo", Hostname: "demo.one.example"}}, Tokens: []types.Token{{ID: "token", Hash: strings.Repeat("a", 64), Kind: "provider", UserID: "user", WorkspaceID: "w1", AgentID: "agent", ExpiresAt: time.Now().Add(time.Hour)}}}
-	if err = store.Save(t.Context(), baseline, 0); err != nil {
+	if err = store.Save(t.Context(), types.Snapshot{}, baseline); err != nil {
 		t.Fatal(err)
 	}
 	if err = store.Close(); err != nil {
@@ -75,7 +75,7 @@ func TestPostgresPersistenceAndConstraints(t *testing.T) {
 	if loaded.Revision != 1 || len(loaded.Services) != 1 || len(loaded.Tokens) != 1 || loaded.Tokens[0].Hash != baseline.Tokens[0].Hash {
 		t.Fatal("PostgreSQL restart lost records or token hashes")
 	}
-	if err = store.Save(t.Context(), types.Snapshot{Revision: 1}, 0); types.KindOf(err) != "conflict" {
+	if err = store.Save(t.Context(), types.Snapshot{}, types.Snapshot{Revision: 1}); types.KindOf(err) != "conflict" {
 		t.Fatalf("stale PostgreSQL writer not fenced: %v", err)
 	}
 	for _, resource := range []string{"service", "grant"} {
@@ -87,7 +87,7 @@ func TestPostgresPersistenceAndConstraints(t *testing.T) {
 			} else {
 				invalid.Grants = []types.Grant{{ID: "foreign", WorkspaceID: "w2", ResourceType: "service", ResourceID: "service", SubjectType: "anonymous", StartsAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}}
 			}
-			if err := store.Save(t.Context(), invalid, 1); err == nil {
+			if err := store.Save(t.Context(), baseline, invalid); err == nil {
 				t.Fatal("cross-workspace composite foreign key accepted")
 			}
 			got, err := store.Load(t.Context())

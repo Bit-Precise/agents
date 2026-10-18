@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agents/control/types"
 	"github.com/bit-precise/agents/edge"
 )
@@ -122,7 +123,7 @@ func (c *Client) Identity(token string) (out types.Identity, err error) {
 	err = c.call(context.Background(), "identity", map[string]string{"token": token}, &out, 3*time.Second)
 	return
 }
-func (c *Client) Agent(id string) (out types.Agent, err error) {
+func (c *Client) Agent(id string) (out api.Agent, err error) {
 	err = c.call(context.Background(), "agent", map[string]string{"id": id}, &out, 3*time.Second)
 	return
 }

@@ -6,7 +6,7 @@
 
 | 进程 / 镜像 | 职责 |
 |---|---|
-| `agents control` / `ghcr.io/bit-precise/agents-control` | SQL 持久化、注册/审批/授权、用户/浏览器身份和内部策略 API |
+| `agents control` / `ghcr.io/bit-precise/agents-control` | SQL 持久化、注册与配置自动校验、授权、用户/浏览器身份和内部策略 API |
 | `agents edge` / `ghcr.io/bit-precise/agents-edge` | XHTTP 接入、连接目录、Serve/Egress 数据转发；通过受认证元数据 API 查询 Control |
 | `agents console` / `ghcr.io/bit-precise/agents-console` | 静态管理界面；Control 同源代理，浏览器凭据不会交给静态组件 |
 
@@ -26,7 +26,7 @@ bin/agents init --config .run/agents.yaml
 bin/agents serve --config .run/agents.yaml
 ```
 
-初始管理员令牌只写入私有文件。完整设备注册、批准、Serve/Egress 验证见[本机运行手册](docs/local-development.md)。设备端配置、安装包和系统服务属于 agentd 仓库。
+初始管理员令牌只写入私有文件。完整设备注册、Serve/Egress 验证见[本机运行手册](docs/local-development.md)。设备端配置、安装包和系统服务属于 agentd 仓库。
 
 ## Kubernetes
 
@@ -51,7 +51,8 @@ docker buildx build --ssh default --platform linux/amd64,linux/arm64 --target co
 
 ## 实现与验证
 
-- [实体、状态机与路由](docs/backend-implementation.md)
+- [实体、状态机与关系（权威）](docs/model.md)
+- [组件、路由与接口](docs/backend-implementation.md)
 - [User / Service Account 与 Hydra Device Flow 目标设计](docs/identity-and-device-flow.md)（待实现；区分设备归属、运行主体与登录操作人，接入不设人工审批）
 - [Edge 授权与租约](edge/README.md)
 - [来源与依赖](THIRD_PARTY_NOTICES.md)
@@ -66,6 +67,6 @@ Console 使用 React、TypeScript、shadcn/ui。前端 API 类型、客户端和
 
 认证支持标准 OIDC discovery、授权码 + PKCE、state/nonce 和 ID token 校验，并按 issuer + subject 绑定用户。新用户获得仅自己为 owner 的 `personal-<userID>` Workspace，已有用户不补建。配置中的 bootstrap 管理员 subject 仅首次创建账户时生效；`oidc.adminEmails` 可按已验证邮箱授予实例管理员，要求 ID token 的 `email_verified` 为布尔值 `true`，移除名单后重启 Control 会撤销邮箱派生的管理员权限。Token 登录保留给自动化与应急管理。
 
-已确认的下一版身份设计增加单 Workspace 的 Service Account 和独立 Hydra：agentd 用 OAuth Device Flow 引导人类用户完成 OIDC、选择 Workspace 和本人/SA 身份，再以限定用途的 access token 换取每设备独立凭据。身份、权限与策略自动校验通过即接入，取消人工审批；配置变更也按策略直接接受或拒绝。SA 由 maintainer 及以上管理，不能登录 Console。当前实现仍是 User 绑定设备及人工批准的旧模型，尚未交付这些新能力；详细流程、API 增量、撤权和迁移要求见上述目标设计。
+已确认的下一版身份设计增加单 Workspace 的 Service Account 和独立 Hydra：agentd 用 OAuth Device Flow 引导人类用户完成 OIDC、选择 Workspace 和本人/SA 身份，再以限定用途的 access token 换取每设备独立凭据。身份、权限与策略自动校验通过即接入，取消人工审批；配置变更也按策略直接接受或拒绝。SA 由 maintainer 及以上管理，不能登录 Console。当前实现已取消人工审批（注册与配置变更由 Control 自动校验，见 [model](docs/model.md)），但仍是 User 绑定设备，尚未交付 SA 与 Device Flow；详细流程、API 增量、撤权和迁移要求见上述目标设计。
 
 目前没有真实 CDN 兼容性验收、自动秘密轮换或多 Edge 目录。OIDC 增加显式 v1→v2 数据库迁移，保留现有用户、设备、授权和凭据。Control 启动时需要身份提供方 discovery 可达；浏览器会话不超过 ID token 到期时间及 8 小时，不持久化 IdP tokens。

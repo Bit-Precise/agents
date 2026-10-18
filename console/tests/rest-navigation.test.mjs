@@ -144,16 +144,13 @@ test("Console uses scoped REST resources across admin pagination and rapid role 
     await api("PUT", `/v1/admin/workspaces/${sharedWorkspace.id}/memberships/${user.user.id}`, { role: "developer" });
     const rule = { domain: { exact: "example.test" }, ports: [443], protocol: "tls" };
     const enrollment = await api("POST", "/v1/admin/enrollment-keys", {
-      workspaceId: workspace.id, userId: user.user.id, roles: ["ingress", "serve", "egress"], autoApprove: true, maxUses: 1,
+      workspaceId: workspace.id, userId: user.user.id, roles: ["ingress", "serve", "egress"], maxUses: 1,
     }, adminToken, 201);
     localTokens.add(enrollment.token);
     const enrolled = await api("POST", "/api/v1/enroll", {
-      enrollmentKey: enrollment.token,
-      config: {
-        apiVersion: "agents/v1alpha1", kind: "AgentConfig", instance: base, workspace: workspace.name,
-        agent: { name: "ui-device", stateDir: "./state" },
-        transport: { type: "xhttp", mode: "packet-up", endpoint: base + "/agent", allowHTTP: true },
-        ingress: { enabled: true, http: { enabled: true, listen: "127.0.0.1:18080" }, routes: [rule], onUnmatched: "reject" },
+      enrollmentKey: enrollment.token, instance: base, endpoint: base + "/agent", workspace: workspace.name, name: "ui-device",
+      desired: {
+        ingress: { enabled: true },
         serve: { enabled: true, services: [{ name: "demo", origin: "http://127.0.0.1:18081" }] },
         egress: { enabled: true, allow: [rule] },
       },

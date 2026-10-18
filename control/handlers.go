@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	clientconfig "github.com/bit-precise/agentd/config"
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agents/control/types"
 )
 
@@ -100,7 +100,7 @@ func (a *App) enroll(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	if strings.TrimSuffix(b.Config.Instance, "/") != strings.TrimSuffix(a.Config.ServerURL, "/") || b.Config.Transport.Endpoint != a.Config.EdgeURL {
+	if strings.TrimSuffix(b.Instance, "/") != strings.TrimSuffix(a.Config.ServerURL, "/") || strings.TrimSuffix(b.Endpoint, "/") != strings.TrimSuffix(a.Config.EdgeURL, "/") {
 		apiError(w, 400, "invalid", "agent instance and edge endpoint must match this server")
 		return
 	}
@@ -117,15 +117,14 @@ func (a *App) agentCredentials(w http.ResponseWriter, r *http.Request) {
 	v.ControlURL = strings.TrimSuffix(a.Config.ServerURL, "/")
 	respond(w, v, err, 200)
 }
+
+// agentConfig accepts or rejects a desired spec automatically; the device's
+// control token identifies the Agent, so no instance or endpoint is resent.
 func (a *App) agentConfig(w http.ResponseWriter, r *http.Request) {
-	var c clientconfig.Config
-	if !decode(w, r, &c) {
+	var update api.ConfigUpdate
+	if !decode(w, r, &update) {
 		return
 	}
-	if strings.TrimSuffix(c.Instance, "/") != strings.TrimSuffix(a.Config.ServerURL, "/") || c.Transport.Endpoint != a.Config.EdgeURL {
-		apiError(w, 400, "invalid", "agent instance and edge endpoint must match this server")
-		return
-	}
-	v, err := a.State.UpdateAgent(controlToken(r), c)
+	v, err := a.State.UpdateAgent(controlToken(r), update)
 	respond(w, v, err, 200)
 }

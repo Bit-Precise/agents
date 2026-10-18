@@ -2,7 +2,7 @@
 
 本 chart 将服务端拆为 Control、Edge 和 Console 三个进程、三个镜像、三个 Deployment。它使用当前的单 Control、单 Edge 状态模型；PostgreSQL 或多个 Console 副本不会让 Control/Edge 自动具备高可用能力。
 
-后续 [身份与 Device Flow 设计](identity-and-device-flow.md) 将增加独立 Hydra、数据库、迁移/设备 client 初始化和受保护的 Admin API，并取消接入及配置变更的人工审批。该部分尚未进入当前 chart；以下审批相关描述与部署参数均为现有版本行为，不要将设计中的 Hydra 参数当作已支持 values。
+后续 [身份与 Device Flow 设计](identity-and-device-flow.md) 将增加独立 Hydra、数据库、迁移/设备 client 初始化和受保护的 Admin API。该部分尚未进入当前 chart，不要将设计中的 Hydra 参数当作已支持 values。接入及配置变更的人工审批已取消，由 Control 自动校验，无需额外部署参数。
 
 ```mermaid
 flowchart LR
@@ -16,7 +16,7 @@ flowchart LR
     Edge <-->|业务流| Agent
 ```
 
-管理 API、注册、审批、浏览器/OIDC 登录在 Control。Edge 查询 Control 的身份/路由决策并维护 provider 会话，业务正文留在 Edge↔agentd 路径。Console 不持有管理员、内部 RPC 或数据库 Secret；Control 代理它的静态资源时会剥离浏览器认证头和 Cookie。
+管理 API、注册与配置自动校验、浏览器/OIDC 登录在 Control。Edge 查询 Control 的身份/路由决策并维护 provider 会话，业务正文留在 Edge↔agentd 路径。Console 不持有管理员、内部 RPC 或数据库 Secret；Control 代理它的静态资源时会剥离浏览器认证头和 Cookie。
 
 ## 准备与安装
 
@@ -54,7 +54,7 @@ helm upgrade --install agents ./charts/agents \
 
 也可将 `/agent` 放在控制台同一个 host；chart 在该 host 下将 `/agent` 路由到 Edge、`/` 路由到 Control。Console 没有公网 Ingress 规则。
 
-`*.agents.example.com` 只覆盖一个额外 label，不能覆盖 `demo.workspace1.agents.example.com`。为每个 Workspace 显式配置 DNS、`ingress.serviceHosts` 与 TLS Secret；证书可包含多个 SAN，也可每 Workspace 使用一张 wildcard 证书。chart 会拒绝错误层级的服务 wildcard。具体服务仍需 PublishedRoute、批准的 provider 与有效 Grant，wildcard 不授予访问权。
+`*.agents.example.com` 只覆盖一个额外 label，不能覆盖 `demo.workspace1.agents.example.com`。为每个 Workspace 显式配置 DNS、`ingress.serviceHosts` 与 TLS Secret；证书可包含多个 SAN，也可每 Workspace 使用一张 wildcard 证书。chart 会拒绝错误层级的服务 wildcard。具体服务仍需已发布的 Service、生效配置包含该服务的在线 provider 与有效 Grant，wildcard 不授予访问权。
 
 三个组件在集群内监听明文 `:8080`，ConfigMap 固定 `tlsOffload: true`，公网 URL 必须是 HTTPS。可信 Ingress 必须完成实际 TLS 终止并保留正确的 Host；不要将组件 Service 改为无认证的公网 HTTP 入口。默认 `ingress.tls: []` 依赖 Controller 默认服务器证书，部署者必须确认其覆盖所有公网名字。
 

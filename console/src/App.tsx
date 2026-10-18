@@ -147,9 +147,15 @@ const actionLabels: Record<string, string> = {
   "membership.set": "更新成员角色",
   "membership.remove": "移除成员",
   "agent.enroll": "注册 Agent",
-  "agent.approve": "批准 Agent",
+  "agent.approve": "批准 Agent（已移除的旧流程）",
   "agent.revoke": "撤销 Agent",
-  "agent.desired": "更新期望配置",
+  "agent.purge": "清除已撤销的 Agent",
+  "agent.desired": "更新期望配置（旧流程）",
+  "agent.desired.apply": "自动应用期望配置",
+  "agent.desired.reject": "自动拒绝期望配置",
+  "agent.migrate.approval_removed": "迁移旧审批记录",
+  "service.publish": "发布服务",
+  "service.purge": "清除服务名称",
   "agent.tokens.renew": "续期设备凭据",
   "service.enabled": "更新服务发布状态",
   "grant.create": "添加访问授权",
@@ -284,7 +290,7 @@ export default function App() {
                   : "";
   const filterOptions =
     filterField === "status"
-      ? ["pending", "active", "revoked"]
+      ? ["active", "revoked"]
       : filterField === "kind"
         ? ["serve", "egress"]
         : filterField === "role"
@@ -579,7 +585,7 @@ export default function App() {
     let headers: string[] = [],
       rows: { key: string; cells: ReactNode[] }[] = [];
     if (resource === "agents") {
-      headers = ["Agent", "工作空间", "角色", "状态", "批准截止", "操作"];
+      headers = ["Agent", "工作空间", "角色", "状态", "生效 Revision", "操作"];
       rows = (items as Agent[]).map((a) => ({
         key: a.id,
         cells: [
@@ -588,16 +594,16 @@ export default function App() {
           <Tags items={agentRoles(a)} />,
           <div className="flex gap-1">
             <Status {...health(state, a)} />
-            {a.pendingApproval && <Status label="待批准" tone="warn" />}
+            {a.lastRejection && <Status label="配置被拒绝" tone="warn" />}
           </div>,
-          time(a.approval.expiresAt),
+          String(a.effective.revision),
           <div className="row-actions">
             <Button
               size="sm"
               variant="outline"
               onClick={() => void openAgent(a.id, a.workspaceId)}
             >
-              查看 / 审核
+              查看
             </Button>
             {a.status !== "revoked" &&
               (canManage(state, viewer, a.workspaceId) ||
@@ -638,7 +644,7 @@ export default function App() {
       }));
     }
     if (resource === "ingresses" || resource === "egresses") {
-      headers = ["设备", "角色", "状态", "批准 Revision"];
+      headers = ["设备", "角色", "状态", "生效 Revision"];
       rows = (items as (IngressView | EgressView)[]).map((r) => ({
         key: r.id,
         cells: [
@@ -648,7 +654,7 @@ export default function App() {
             label={r.enabled ? r.status : "未启用"}
             tone={r.enabled ? "good" : "muted"}
           />,
-          String(r.approvedRevision),
+          String(r.effectiveRevision),
         ],
       }));
     }
@@ -1349,7 +1355,6 @@ export default function App() {
                                 : filterField === "enabled"
                                   ? "已停用"
                                   : "未撤销",
-                            pending: "待批准",
                             active: "有效",
                             revoked: "撤销",
                             serve: "服务发布",
@@ -1427,7 +1432,7 @@ export default function App() {
                 {
                   title: "已注册 Agents",
                   value: state.totals.agents,
-                  foot: `${state.totals.pending ?? "—"} 个待批准`,
+                  foot: `${state.totals.revoked ?? "—"} 个已撤销`,
                 },
                 {
                   title: "已发布服务",

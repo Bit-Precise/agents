@@ -3,9 +3,11 @@ package edge
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/connection"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agentd/transport/xhttp"
@@ -50,23 +52,22 @@ func minExpiry(values ...time.Time) time.Time {
 	return result
 }
 
-func approvedServices(agent types.Agent, declared []string) map[string]bool {
-	allowed := make(map[string]bool)
-	if !agent.Desired.Serve.Enabled {
-		return allowed
+// observe records the provider's effective configuration for status display.
+// Authorization always uses a fresh Control decision, never these fields.
+func (e *Edge) observe(p *provider, agent api.Agent) {
+	services := make([]string, 0, len(agent.Effective.Services))
+	for _, service := range agent.Effective.Services {
+		services = append(services, service.Name)
 	}
-	local := make(map[string]string)
-	for _, service := range agent.Desired.Serve.Services {
-		local[service.Name] = service.Origin
-	}
-	for _, name := range declared {
-		if origin, ok := agent.Approval.Services[name]; ok && origin != "" && local[name] == origin {
-			allowed[name] = true
-		}
-	}
-	return allowed
+	sort.Strings(services)
+	e.mu.Lock()
+	p.revision, p.services, p.egress = agent.Effective.Revision, services, len(agent.Effective.Egress) > 0
+	e.mu.Unlock()
 }
 
+// authenticate admits a session with a fresh Control decision. It does not
+// replace the directory entry: a new provider session takes over only after its
+// handshake completes (see accept), so a failed reconnect never displaces it.
 func (e *Edge) authenticate(p *provider, hello connection.Hello) (connection.Principal, error) {
 	transportID, ok := xhttp.AuthenticatedPrincipal(p.raw)
 	if !ok {
@@ -77,32 +78,17 @@ func (e *Edge) authenticate(p *provider, hello connection.Hello) (connection.Pri
 		return connection.Principal{}, ErrDenied
 	}
 	agent, err := e.backend.Agent(id.AgentID)
-	if err != nil || agent.ID != id.AgentID || agent.WorkspaceID != id.WorkspaceID || agent.Workspace != id.Workspace || agent.Status == "revoked" {
+	if err != nil || agent.ID != id.AgentID || agent.WorkspaceID != id.WorkspaceID || agent.Workspace != id.Workspace || agent.Status != api.StatusActive {
 		return connection.Principal{}, ErrDenied
 	}
 	expires := minExpiry(id.ExpiresAt, time.Now().Add(e.cfg.SessionTTL))
-	services := map[string]bool{}
-	egress := false
-	if hello.Role == connection.RoleProvider {
-		if agent.Status != "active" || agent.Approval.Revision == 0 || hello.Revision != agent.Approval.Revision || !agent.Approval.ExpiresAt.After(time.Now()) {
-			return connection.Principal{}, ErrDenied
-		}
-		expires = minExpiry(expires, agent.Approval.ExpiresAt)
-		services = approvedServices(agent, hello.Services)
-		egress = hello.EgressEnabled && agent.Desired.Egress.Enabled && len(agent.Desired.Egress.Allow) > 0 && len(agent.Approval.Egress) > 0
-	} else if agent.Status != "pending" && agent.Status != "active" {
-		return connection.Principal{}, ErrDenied
-	}
-
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
 		return connection.Principal{}, ErrClosed
 	}
-	var old *provider
 	if hello.Role == connection.RoleProvider {
-		old = e.providers[id.AgentID]
-		if old != nil && old.connector != hello.ConnectorID {
+		if old := e.providers[id.AgentID]; old != nil && old.connector != hello.ConnectorID {
 			e.mu.Unlock()
 			return connection.Principal{}, ErrDenied
 		}
@@ -113,22 +99,10 @@ func (e *Edge) authenticate(p *provider, hello connection.Hello) (connection.Pri
 	p.token = hello.Token
 	p.connector = hello.ConnectorID
 	p.generation = e.generation[key]
-	p.revision = agent.Approval.Revision
-	p.services = services
-	p.egress = egress
-	if hello.Role == connection.RoleProvider {
-		e.providers[id.AgentID] = p
-	}
-	principal := connection.Principal{Role: hello.Role, Workspace: id.Workspace, AgentID: id.AgentID, UserID: id.UserID, ConnectorID: hello.ConnectorID,
-		Generation: p.generation, Revision: p.revision, ExpiresAt: expires, EgressEnabled: egress}
-	for name := range services {
-		principal.Services = append(principal.Services, name)
-	}
 	e.mu.Unlock()
-	if old != nil {
-		e.closeProvider(old)
-	}
-	return principal, nil
+	e.observe(p, agent)
+	return connection.Principal{Role: hello.Role, Workspace: id.Workspace, AgentID: id.AgentID, UserID: id.UserID, ConnectorID: hello.ConnectorID,
+		Generation: p.generation, ExpiresAt: expires}, nil
 }
 
 func (e *Edge) accept(p *provider) {
@@ -142,10 +116,25 @@ func (e *Edge) accept(p *provider) {
 	}
 	e.mu.Lock()
 	p.session = s
-	current := !e.closed && (p.identity.Kind != "provider" || e.providers[p.identity.AgentID] == p)
 	e.mu.Unlock()
-	if !current || !e.currentIdentity(p) {
+	if !e.currentIdentity(p) {
 		return
+	}
+	// The same Connector reconnecting replaces its predecessor only now, once
+	// the new session is ready; the previous session and its flows end here.
+	var old *provider
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return
+	}
+	if p.identity.Kind == "provider" {
+		old = e.providers[p.identity.AgentID]
+		e.providers[p.identity.AgentID] = p
+	}
+	e.mu.Unlock()
+	if old != nil && old != p {
+		e.closeProvider(old)
 	}
 	if p.identity.Kind == "provider" {
 		<-s.Done()
@@ -174,14 +163,12 @@ func (e *Edge) currentIdentity(p *provider) bool {
 		return false
 	}
 	agent, err := e.backend.Agent(id.AgentID)
-	if err != nil || agent.WorkspaceID != id.WorkspaceID || agent.Status == "revoked" {
+	if err != nil || agent.WorkspaceID != id.WorkspaceID || agent.Status != api.StatusActive {
 		return false
 	}
-	if id.Kind == "provider" {
-		if agent.Status != "active" || agent.Approval.Revision != p.revision || !agent.Approval.ExpiresAt.After(time.Now()) {
-			return false
-		}
-	}
+	// A changed effective revision is not a revocation: each flow is rechecked
+	// by content, so unrelated configuration updates keep shared sessions.
+	e.observe(p, agent)
 	return true
 }
 

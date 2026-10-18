@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/connection"
 	"github.com/bit-precise/agentd/transport/xhttp"
 	"github.com/bit-precise/agents/control/types"
@@ -18,7 +19,7 @@ import (
 
 type Backend interface {
 	Identity(token string) (types.Identity, error)
-	Agent(agentID string) (types.Agent, error)
+	Agent(agentID string) (api.Agent, error)
 	ResolveServe(host, userID string) (types.Decision, error)
 	ResolveEgress(workspace, userID, host string, port int) (types.Decision, error)
 	Subscribe() (<-chan struct{}, func())
@@ -29,10 +30,12 @@ type Config struct {
 	FlowTTL    time.Duration
 	// MaxFlowLifetime is the immutable hard deadline, independent of short
 	// policy leases. SessionTTL is also a hard maximum, not a policy cache TTL.
-	MaxFlowLifetime   time.Duration
-	MaxFlows          int
-	AllowLoopbackHTTP bool
-	TLSOffload        bool
+	MaxFlowLifetime time.Duration
+	MaxFlows        int
+	// MaxFlowsPerWorkspace keeps one tenant from exhausting MaxFlows.
+	MaxFlowsPerWorkspace int
+	AllowLoopbackHTTP    bool
+	TLSOffload           bool
 	// RecheckInterval bounds expiry/revocation when notifications are coalesced.
 	RecheckInterval time.Duration
 }
@@ -43,6 +46,9 @@ var (
 	ErrClosed      = errors.New("edge closed")
 )
 
+// provider is one authenticated agents session of either role. revision,
+// services and egress mirror the Agent's effective configuration for status
+// display only; every flow is authorized by a fresh Control decision.
 type provider struct {
 	raw        net.Conn
 	session    *connection.Session
@@ -51,7 +57,7 @@ type provider struct {
 	connector  string
 	generation uint64
 	revision   uint64
-	services   map[string]bool
+	services   []string
 	egress     bool
 	created    time.Time
 }
@@ -89,11 +95,15 @@ func New(backend Backend, cfg Config) (*Edge, error) {
 	if cfg.MaxFlows == 0 {
 		cfg.MaxFlows = 1024
 	}
+	if cfg.MaxFlowsPerWorkspace == 0 {
+		cfg.MaxFlowsPerWorkspace = min(256, cfg.MaxFlows)
+	}
 	if cfg.RecheckInterval == 0 {
 		cfg.RecheckInterval = time.Second
 	}
 	if cfg.SessionTTL < 0 || cfg.SessionTTL > 24*time.Hour || cfg.FlowTTL < 10*time.Millisecond || cfg.FlowTTL > time.Minute ||
-		cfg.MaxFlowLifetime <= 0 || cfg.MaxFlowLifetime > 24*time.Hour || cfg.MaxFlows < 1 || cfg.MaxFlows > 65536 || cfg.RecheckInterval < 0 {
+		cfg.MaxFlowLifetime <= 0 || cfg.MaxFlowLifetime > 24*time.Hour || cfg.MaxFlows < 1 || cfg.MaxFlows > 65536 ||
+		cfg.MaxFlowsPerWorkspace < 1 || cfg.MaxFlowsPerWorkspace > cfg.MaxFlows || cfg.RecheckInterval < 0 {
 		return nil, errors.New("invalid edge limits")
 	}
 	if cfg.RecheckInterval > cfg.FlowTTL/4 {
@@ -278,11 +288,7 @@ func (e *Edge) Snapshot() Snapshot {
 			continue
 		}
 		v := p.session.Principal()
-		services := make([]string, 0, len(p.services))
-		for name := range p.services {
-			services = append(services, name)
-		}
-		sort.Strings(services)
+		services := append([]string{}, p.services...)
 		out.Connections = append(out.Connections, ConnectionStatus{ID: v.SessionID, WorkspaceID: p.identity.WorkspaceID, AgentID: v.AgentID, Workspace: v.Workspace, Role: string(v.Role), ConnectorID: v.ConnectorID,
 			SessionID: v.SessionID, Generation: v.Generation, Revision: p.revision, Services: services, EgressEnabled: p.egress, ConnectedAt: p.created, ExpiresAt: v.ExpiresAt})
 	}

@@ -242,13 +242,13 @@ export async function loadView(
         "agents",
         user,
         workspaceId,
-        { pageSize: 1, pendingApproval: true },
+        { pageSize: 1, status: "revoked" },
         signal,
       ),
     ]);
     counts.forEach((r, i) => {
       if (r.status === "fulfilled") {
-        view.totals[["agents", "servers", "routes", "pending"][i]] =
+        view.totals[["agents", "servers", "routes", "revoked"][i]] =
           r.value.pagination.total;
       }
     });

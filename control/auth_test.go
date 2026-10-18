@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bit-precise/agentd/config"
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agents/control/types"
 )
 
@@ -40,12 +40,12 @@ func TestServiceLoginBrokerBindsHostStateAndAuthenticationExpiry(t *testing.T) {
 	if _, err = app.State.SetMembership(admin.ID, workspace.ID, user.ID, "developer"); err != nil {
 		t.Fatal(err)
 	}
-	_, key, err := app.State.CreateEnrollmentKey(admin.ID, types.EnrollmentKey{WorkspaceID: workspace.ID, UserID: user.ID, Roles: []string{"serve"}, MaxUses: 1, AutoApprove: true})
+	_, key, err := app.State.CreateEnrollmentKey(admin.ID, types.EnrollmentKey{WorkspaceID: workspace.ID, UserID: user.ID, Roles: []string{"serve"}, MaxUses: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	desired := config.Config{APIVersion: "agents/v1alpha1", Kind: "AgentConfig", Instance: cfg.ServerURL, Workspace: "work", Agent: config.AgentConfig{Name: "laptop", StateDir: "./state"}, Transport: config.TransportConfig{Type: "xhttp", Mode: "packet-up", Endpoint: cfg.EdgeURL}, Serve: config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: "http://127.0.0.1:3000"}}}, Ingress: config.IngressConfig{OnUnmatched: "reject"}}
-	if _, err = app.State.Enroll(types.EnrollRequest{EnrollmentKey: key, Config: desired}); err != nil {
+	desired := api.AgentSpec{Serve: api.ServeSpec{Enabled: true, Services: []api.ServiceSpec{{Name: "demo", Origin: "http://127.0.0.1:3000"}}}}
+	if _, err = app.State.Enroll(types.EnrollRequest{EnrollmentKey: key, Instance: cfg.ServerURL, Endpoint: cfg.EdgeURL, Workspace: "work", Name: "laptop", Desired: desired}); err != nil {
 		t.Fatal(err)
 	}
 	nonce := strings.Repeat("a", 64)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/connection"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agents/control/types"
@@ -65,7 +66,7 @@ func (s *State) CreateEgressRoute(actorID string, value types.EgressRoute) (type
 		if a == nil || a.WorkspaceID != w.ID {
 			return problem(types.KindForbidden, "exit agent must belong to this workspace")
 		}
-		if a.Status == "revoked" || !slices.Contains(a.Roles, "egress") {
+		if a.Status != api.StatusActive || !slices.Contains(roleCeiling(snap, a), api.RoleEgress) {
 			return problem(types.KindForbidden, "agent cannot provide egress")
 		}
 		for _, r := range snap.EgressRoutes {
@@ -127,7 +128,7 @@ func (s *State) CreateGrant(actorID string, value types.Grant) (types.Grant, err
 			}
 			external = true
 		case "user":
-			if _, err := requireUser(snap, value.SubjectID); err != nil {
+			if _, err := requireTargetUser(snap, value.SubjectID); err != nil {
 				return err
 			}
 			external = member(snap, w.ID, value.SubjectID) == nil
@@ -159,6 +160,8 @@ func (s *State) CreateGrant(actorID string, value types.Grant) (types.Grant, err
 		value.ID = randomID()
 		value.WorkspaceID = w.ID
 		value.Revoked = false
+		value.External = external
+		value.CreatedBy = actorID
 		snap.Grants = append(snap.Grants, value)
 		audit(snap, actorID, "grant.create", value.ID)
 		return nil
@@ -204,13 +207,7 @@ func (s *State) RevokeAgent(actorID, id string) error {
 		} else if _, err := requireUser(snap, actorID); err != nil {
 			return err
 		}
-		a.Status = "revoked"
-		for i := range snap.Tokens {
-			if snap.Tokens[i].AgentID == id {
-				snap.Tokens[i].Revoked = true
-			}
-		}
-		audit(snap, actorID, "agent.revoke", id)
+		revokeAgent(snap, a, actorID, "explicit")
 		return nil
 	})
 }
@@ -228,12 +225,7 @@ func (s *State) RevokeEnrollmentKey(actorID, id string) error {
 			} else if _, err := requireUser(snap, actorID); err != nil {
 				return err
 			}
-			k.Revoked = true
-			for j := range snap.Tokens {
-				if snap.Tokens[j].Kind == "enrollment" && snap.Tokens[j].ID == id {
-					snap.Tokens[j].Revoked = true
-				}
-			}
+			revokeEnrollmentKey(snap, k)
 			audit(snap, actorID, "enrollment_key.revoke", id)
 			return nil
 		}
@@ -286,6 +278,9 @@ func (s *State) SetEgressRouteEnabled(actorID, id string, enabled bool) (types.E
 	return out, err
 }
 
+// grantDeadline evaluates the scope of each grant now, not when it was made:
+// an internal user grant only matches while its subject is still a member of
+// the resource Workspace, so leaving cannot turn it into an external share.
 func grantDeadline(snap *types.Snapshot, resourceType, resourceID, userID string, now time.Time) time.Time {
 	var until time.Time
 	u := user(snap, userID)
@@ -295,7 +290,8 @@ func grantDeadline(snap *types.Snapshot, resourceType, resourceID, userID string
 		}
 		match := g.SubjectType == "anonymous" && resourceType == "service"
 		if u != nil && !u.Disabled {
-			match = match || g.SubjectType == "user" && g.SubjectID == userID || g.SubjectType == "workspace" && member(snap, g.SubjectID, userID) != nil
+			userMatch := g.SubjectType == "user" && g.SubjectID == userID && (g.External || member(snap, g.WorkspaceID, userID) != nil)
+			match = match || userMatch || g.SubjectType == "workspace" && member(snap, g.SubjectID, userID) != nil
 		}
 		if match && g.ExpiresAt.After(until) {
 			until = g.ExpiresAt
@@ -360,14 +356,13 @@ func (s *State) ResolveServe(host, userID string) (types.Decision, error) {
 		return types.Decision{}, problem(types.KindForbidden, "service access is not granted")
 	}
 	a := agent(snap, found.AgentID)
-	if a == nil {
+	if a == nil || !agentAllowed(snap, a) {
 		return types.Decision{}, problem(types.KindUnavailable, "service provider unavailable")
 	}
-	view := agentView(snap, *a)
-	if view.Status != "active" || view.Approval.Services[found.Name] == "" {
-		return types.Decision{}, problem(types.KindUnavailable, "service provider is pending or locally withdrawn")
+	if _, ok := a.Effective.Service(found.Name); !ok {
+		return types.Decision{}, problem(types.KindUnavailable, "service is not in the provider's effective configuration")
 	}
-	return types.Decision{ResourceType: "service", ResourceID: found.ID, WorkspaceID: found.WorkspaceID, Workspace: a.Workspace, AgentID: a.ID, ServiceName: found.Name, Hostname: domain, UserID: userID, Revision: a.Approval.Revision, PolicyRevision: snap.Revision, ExpiresAt: cappedDeadline(until)}, nil
+	return types.Decision{ResourceType: "service", ResourceID: found.ID, WorkspaceID: found.WorkspaceID, Workspace: workspace(snap, found.WorkspaceID).Name, AgentID: a.ID, ServiceName: found.Name, Hostname: domain, UserID: userID, Revision: a.Effective.Revision, ExpiresAt: cappedDeadline(until)}, nil
 }
 
 func (s *State) ResolveEgress(workspaceSlug, userID, host string, port int) (types.Decision, error) {
@@ -418,15 +413,11 @@ func (s *State) ResolveEgress(workspaceSlug, userID, host string, port int) (typ
 		return types.Decision{}, problem(types.KindForbidden, "selected egress route is not granted")
 	}
 	a := agent(snap, r.AgentID)
-	if a == nil {
-		return types.Decision{}, problem(types.KindUnavailable, "exit agent unavailable")
-	}
-	view := agentView(snap, *a)
-	if view.Status != "active" {
+	if a == nil || !agentAllowed(snap, a) {
 		return types.Decision{}, problem(types.KindUnavailable, "exit agent is inactive")
 	}
-	if !policy.Allowed(view.Approval.Egress, view.Approval.Deny, domain, port, "tls") {
+	if !policy.Allowed(a.Effective.Egress, a.Effective.Deny, domain, port, "tls") {
 		return types.Decision{}, problem(types.KindForbidden, "exit agent does not permit this destination")
 	}
-	return types.Decision{ResourceType: "egress", ResourceID: r.ID, WorkspaceID: w.ID, Workspace: w.Name, AgentID: a.ID, UserID: userID, Destination: connection.Destination{Host: domain, Port: uint16(port)}, Revision: a.Approval.Revision, PolicyRevision: snap.Revision, ExpiresAt: cappedDeadline(until)}, nil
+	return types.Decision{ResourceType: "egress", ResourceID: r.ID, WorkspaceID: w.ID, Workspace: w.Name, AgentID: a.ID, UserID: userID, Destination: connection.Destination{Host: domain, Port: uint16(port)}, Revision: a.Effective.Revision, ExpiresAt: cappedDeadline(until)}, nil
 }

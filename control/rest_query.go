@@ -26,7 +26,7 @@ var resourceQueries = map[string]querySpec{
 	"users":           {[]string{"q", "disabled", "admin", "workspaceId"}, []string{"id", "name", "createdAt"}},
 	"workspaces":      {[]string{"q", "userId", "ownerId"}, []string{"id", "name", "createdAt"}},
 	"memberships":     {[]string{"workspaceId", "userId", "role"}, []string{"id", "workspaceId", "userId", "role"}},
-	"agents":          {[]string{"workspaceId", "userId", "status", "pendingApproval", "q"}, []string{"id", "name", "createdAt", "status"}},
+	"agents":          {[]string{"workspaceId", "userId", "status", "q"}, []string{"id", "name", "createdAt", "status"}},
 	"ingresses":       {[]string{"workspaceId", "agentId", "status", "enabled", "q"}, []string{"id", "name", "status"}},
 	"egresses":        {[]string{"workspaceId", "agentId", "status", "enabled", "q"}, []string{"id", "name", "status"}},
 	"enrollment-keys": {[]string{"workspaceId", "userId", "revoked"}, []string{"id", "expiresAt"}},
@@ -161,12 +161,12 @@ func parseResourceQuery(r *http.Request, spec querySpec, resource string) (map[s
 			if value != "asc" && value != "desc" {
 				return nil, invalidQuery("sortOrder must be asc or desc")
 			}
-		case "disabled", "admin", "enabled", "revoked", "pendingApproval":
+		case "disabled", "admin", "enabled", "revoked":
 			if value != "true" && value != "false" {
 				return nil, invalidQuery(key + " must be true or false")
 			}
 		case "status":
-			if !slices.Contains([]string{"pending", "active", "revoked"}, value) {
+			if !slices.Contains([]string{"active", "revoked"}, value) {
 				return nil, invalidQuery("invalid status")
 			}
 		case "kind":

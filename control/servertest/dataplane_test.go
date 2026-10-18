@@ -141,7 +141,7 @@ func testHTTPAndSOCKSEgressOnHarness(t *testing.T, h *harness, shortLeases bool)
 	exitCfg := h.agentConfig(w.Name, "exit")
 	exitCfg.Egress = config.EgressConfig{Enabled: true, Allow: []policy.Rule{tlsRule(domain)}}
 	exitCfg.Serve = config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: origin.URL}}}
-	exit, _ := h.enroll(exitCfg, w, u, []string{"serve", "egress"}, true)
+	exit, _ := h.enroll(exitCfg, w, u, []string{"serve", "egress"})
 	var dials atomic.Int32
 	h.runAgent(exitCfg, exit, supervisor.WithEgressDialer(func(ctx context.Context, network, address string) (net.Conn, error) {
 		if address != net.JoinHostPort(domain, "443") {
@@ -152,7 +152,7 @@ func testHTTPAndSOCKSEgressOnHarness(t *testing.T, h *harness, shortLeases bool)
 	}))
 	clientCfg := h.agentConfig(w.Name, "client")
 	clientCfg.Ingress = config.IngressConfig{Enabled: true, HTTP: config.ListenerConfig{Enabled: true, Listen: freeAddress(t)}, SOCKS: config.ListenerConfig{Enabled: true, Listen: freeAddress(t)}, Routes: []policy.Rule{tlsRule(domain)}, OnUnmatched: "reject"}
-	access, _ := h.enroll(clientCfg, w, u, []string{"ingress"}, true)
+	access, _ := h.enroll(clientCfg, w, u, []string{"ingress"})
 	h.runAgent(clientCfg, access)
 	await(t, func() bool { return h.connected(exit.Agent.ID, "provider") && h.connected(access.Agent.ID, "access") })
 	proxyClient := proxyHTTPClient(t, clientCfg.Ingress.HTTP.Listen, certificate)
@@ -287,7 +287,7 @@ func TestAccessProfileCannotUseAnotherWorkspacesRoute(t *testing.T) {
 	domain := certificate.DNSNames[0]
 	exitCfg := h.agentConfig(w1.Name, "exit")
 	exitCfg.Egress = config.EgressConfig{Enabled: true, Allow: []policy.Rule{tlsRule(domain)}}
-	exit, _ := h.enroll(exitCfg, w1, alice, []string{"egress"}, true)
+	exit, _ := h.enroll(exitCfg, w1, alice, []string{"egress"})
 	var dials atomic.Int32
 	h.runAgent(exitCfg, exit, supervisor.WithEgressDialer(func(ctx context.Context, network, address string) (net.Conn, error) {
 		dials.Add(1)
@@ -296,7 +296,7 @@ func TestAccessProfileCannotUseAnotherWorkspacesRoute(t *testing.T) {
 	route, _ := h.grantRoute(w1, alice, exit.Agent.ID, domain, "private")
 	clientCfg := h.agentConfig(w2.Name, "client")
 	clientCfg.Ingress = config.IngressConfig{Enabled: true, HTTP: config.ListenerConfig{Enabled: true, Listen: freeAddress(t)}, Routes: []policy.Rule{tlsRule(domain)}, OnUnmatched: "reject"}
-	access, _ := h.enroll(clientCfg, w2, bob, []string{"ingress"}, true)
+	access, _ := h.enroll(clientCfg, w2, bob, []string{"ingress"})
 	h.runAgent(clientCfg, access)
 	await(t, func() bool { return h.connected(exit.Agent.ID, "provider") && h.connected(access.Agent.ID, "access") })
 	client := proxyHTTPClient(t, clientCfg.Ingress.HTTP.Listen, certificate)

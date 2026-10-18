@@ -4,7 +4,7 @@
 
 本文是后续身份改造的依据，优先于早期架构草案中“所有 Agent 绑定 User”“所有 access 会话只能表示 User”的描述。
 
-接入和配置变更均不设置人工审批流程。用户本人完成 OAuth 登录与 Workspace/身份选择后，Control 自动执行权限和策略校验，通过即注册并签发凭据；不通过直接拒绝。没有额外审批人、审批队列、待审批状态或设备批准按钮。当前代码中的 `Approval`、`pendingApproval` 和 `/approval` 是待移除的旧模型。
+接入和配置变更均不设置人工审批流程。用户本人完成 OAuth 登录与 Workspace/身份选择后，Control 自动执行权限和策略校验，通过即注册并签发凭据；不通过直接拒绝。没有额外审批人、审批队列、待审批状态或设备批准按钮。取消审批这部分已在当前代码实现：`Approval`、`pendingApproval`、`/approval` 和 `autoApprove` 已经删除（DB v3 迁移），当前实体与状态机见 [model](model.md)；本文其余的 SA 与 Device Flow 仍待实现。
 
 ## 1. 已确定的模型
 
@@ -236,7 +236,7 @@ Control 的持续权威是当前主体、Membership、Agent、生效配置及 Gr
 | `/v1/workspaces/{workspaceId}/enrollment-keys` | 继续独立分页列表/详情/撤销，增加 SA 与 createdBy 筛选；旧 User key 标为 legacy |
 | `/v1/agent-enrollments` | Device Flow AT 的单次注册兑换；不接受浏览器 Cookie 或普通管理 Token 代替该用途 AT |
 | `/v1/admin/agents`、`/v1/workspaces/{workspaceId}/agents` | 保留现有资源层级，使用 `principalType/principalId` 筛选，`createdBy` 独立显示 |
-| 旧 Agent `/approval` 端点与 `pendingApproval` 字段 | 在实现迁移中移除；以自动校验、生效配置/版本及明确的失败状态代替，不增加新的审批接口 |
+| 旧 Agent `/approval` 端点与 `pendingApproval` 字段 | 已移除；以自动校验、生效配置/版本（`effective`）及 `lastRejection` 代替，不增加新的审批接口 |
 | Workspace 的 `/grants` | 增加显式 SA subject；校验实际资源权限、SA 归属以及消费路径是否支持该主体 |
 
 SA 管理要求 maintainer+；给 SA 授业务权限还必须具备对应资源的授权管理权。所有集合沿用 `{items, pagination}`、页码/页大小、服务端筛选排序；不恢复聚合快照接口。SA 只有机器用途凭据，不通过 `/v1/sessions`、`/v1/users/me` 或 User Token 路径取得人类身份。

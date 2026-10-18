@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,9 +19,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/config"
 	"github.com/bit-precise/agentd/connection"
-	"github.com/bit-precise/agentd/credentials"
 	"github.com/bit-precise/agentd/orchestration"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agentd/transport/xhttp"
@@ -29,7 +31,7 @@ import (
 type memoryBackend struct {
 	mu             sync.RWMutex
 	tokens         map[string]types.Identity
-	agents         map[string]types.Agent
+	agents         map[string]api.Agent
 	serve          map[string]types.Decision
 	egress         map[string]types.Decision
 	events         chan struct{}
@@ -45,7 +47,7 @@ func (b *memoryBackend) Identity(token string) (types.Identity, error) {
 	}
 	return v, nil
 }
-func (b *memoryBackend) Agent(id string) (types.Agent, error) {
+func (b *memoryBackend) Agent(id string) (api.Agent, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	v, ok := b.agents[id]
@@ -88,11 +90,12 @@ func (b *memoryBackend) changed() {
 
 func fixtureBackend() *memoryBackend {
 	until := time.Now().Add(time.Minute)
-	b := &memoryBackend{tokens: map[string]types.Identity{}, agents: map[string]types.Agent{}, serve: map[string]types.Decision{}, egress: map[string]types.Decision{}, events: make(chan struct{}, 1)}
+	b := &memoryBackend{tokens: map[string]types.Identity{}, agents: map[string]api.Agent{}, serve: map[string]types.Decision{}, egress: map[string]types.Decision{}, events: make(chan struct{}, 1)}
+	rule := policy.Rule{Domain: policy.Domain{Suffix: "example.com"}, Ports: []int{443}, Protocol: "tls"}
 	for _, id := range []string{"campus", "office", "client", "bob"} {
-		b.agents[id] = types.Agent{ID: id, WorkspaceID: "w1", Workspace: "workspace1", UserID: "alice", Status: "active",
-			Desired:  config.Config{Serve: config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: "demo", Origin: "http://127.0.0.1:8080"}, {Name: "api", Origin: "http://127.0.0.1:8081"}}}, Egress: config.EgressConfig{Enabled: true, Allow: []policy.Rule{{Domain: policy.Domain{Suffix: "example.com"}, Ports: []int{443}, Protocol: "tls"}}}},
-			Approval: credentials.Approval{Revision: 1, ExpiresAt: until, Services: map[string]string{"demo": "http://127.0.0.1:8080", "api": "http://127.0.0.1:8081"}, Egress: []policy.Rule{{Domain: policy.Domain{Suffix: "example.com"}, Ports: []int{443}, Protocol: "tls"}}}}
+		b.agents[id] = api.Agent{ID: id, WorkspaceID: "w1", Workspace: "workspace1", UserID: "alice", Status: api.StatusActive,
+			Desired:   api.AgentSpec{Serve: api.ServeSpec{Enabled: true, Services: []api.ServiceSpec{{Name: "demo", Origin: "http://127.0.0.1:8080"}, {Name: "api", Origin: "http://127.0.0.1:8081"}}}, Egress: api.EgressSpec{Enabled: true, Allow: []policy.Rule{rule}}},
+			Effective: api.EffectiveConfig{Revision: 1, ExpiresAt: until, Services: []api.EffectiveService{{Name: "demo", Origin: "http://127.0.0.1:8080", Hostname: "demo.workspace1.instance.example"}, {Name: "api", Origin: "http://127.0.0.1:8081", Hostname: "api.workspace1.instance.example"}}, Egress: []policy.Rule{rule}}}
 		kind, user := "provider", "alice"
 		if id == "client" || id == "bob" {
 			kind = "access"
@@ -103,11 +106,11 @@ func fixtureBackend() *memoryBackend {
 		b.tokens[id+"-token"] = types.Identity{TokenID: id + "-token-id", Kind: kind, UserID: user, AgentID: id, WorkspaceID: "w1", Workspace: "workspace1", ExpiresAt: until}
 	}
 	for _, route := range []struct{ host, agent string }{{"campus.example.com", "campus"}, {"office.example.com", "office"}} {
-		b.egress["workspace1/alice/"+route.host+"/443"] = types.Decision{ResourceType: "egress", ResourceID: route.agent + "-route", WorkspaceID: "w1", Workspace: "workspace1", AgentID: route.agent, UserID: "alice", Destination: connection.Destination{Host: route.host, Port: 443}, Revision: 1, PolicyRevision: 1, ExpiresAt: until}
+		b.egress["workspace1/alice/"+route.host+"/443"] = types.Decision{ResourceType: "egress", ResourceID: route.agent + "-route", WorkspaceID: "w1", Workspace: "workspace1", AgentID: route.agent, UserID: "alice", Destination: connection.Destination{Host: route.host, Port: 443}, Revision: 1, ExpiresAt: until}
 	}
 	for _, name := range []string{"demo", "api"} {
 		host := name + ".workspace1.instance.example"
-		b.serve[host+"/alice"] = types.Decision{ResourceType: "service", ResourceID: name + "-service", WorkspaceID: "w1", Workspace: "workspace1", AgentID: "office", ServiceName: name, Hostname: host, UserID: "alice", Revision: 1, PolicyRevision: 1, ExpiresAt: until}
+		b.serve[host+"/alice"] = types.Decision{ResourceType: "service", ResourceID: name + "-service", WorkspaceID: "w1", Workspace: "workspace1", AgentID: "office", ServiceName: name, Hostname: host, UserID: "alice", Revision: 1, ExpiresAt: until}
 	}
 	return b
 }
@@ -171,11 +174,9 @@ func (h *harness) dial(t *testing.T, id, connector, transportToken, helloToken s
 	if err != nil {
 		return nil, err
 	}
-	hello := connection.Hello{Version: connection.ProtocolVersion, Role: connection.Role(identity.Kind), Workspace: identity.Workspace, AgentID: id, Token: helloToken, Revision: 1}
+	hello := connection.Hello{Version: connection.ProtocolVersion, Role: connection.Role(identity.Kind), Workspace: identity.Workspace, AgentID: id, Token: helloToken}
 	if identity.Kind == "provider" {
 		hello.ConnectorID = connector
-		hello.Services = []string{"demo", "api", "forged"}
-		hello.EgressEnabled = true
 	}
 	s, err := connection.Client(h.ctx, raw, hello, connection.Config{AuthorizeOpen: authorize})
 	if err != nil {
@@ -355,11 +356,44 @@ func TestConnectorReplacementUsesCASAndRejectsClone(t *testing.T) {
 	if second.Principal().Generation <= first.Principal().Generation {
 		t.Fatal("generation did not advance")
 	}
-	for _, service := range second.Principal().Services {
-		if service == "forged" {
-			t.Fatal("unapproved declaration accepted")
-		}
+}
+
+func TestFailedReconnectDoesNotDisplaceReadyProvider(t *testing.T) {
+	h := newHarness(t)
+	ready := h.provider(t, "office", "same-connector", nil, func(s *connection.Stream) { <-s.Context().Done() })
+	raw, err := xhttp.Dial(h.ctx, h.server.URL+"/agent", xhttp.ClientConfig{HTTPClient: h.server.Client(), Headers: http.Header{"Authorization": {"Bearer office-token"}}})
+	if err != nil {
+		t.Fatal(err)
 	}
+	// Authenticate, then abandon the handshake before the control stream exists.
+	if err := writeTestFrame(raw, connection.Hello{Version: connection.ProtocolVersion, Role: connection.RoleProvider, Workspace: "workspace1", AgentID: "office", ConnectorID: "same-connector", Token: "office-token"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	raw.Close()
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-ready.Done():
+		t.Fatal("an unfinished reconnect displaced the ready provider session")
+	default:
+	}
+	h.e.mu.Lock()
+	current := h.e.providers["office"]
+	h.e.mu.Unlock()
+	if current == nil || current.session.Principal().SessionID != ready.Principal().SessionID {
+		t.Fatal("directory no longer points at the ready session")
+	}
+}
+
+func writeTestFrame(w io.Writer, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	var size [4]byte
+	binary.BigEndian.PutUint32(size[:], uint32(len(data)))
+	_, err = w.Write(append(size[:], data...))
+	return err
 }
 
 func TestServeOneFlowPerRequestAndBodyIntegrity(t *testing.T) {
@@ -442,12 +476,18 @@ func TestResourceRevocationKeepsSiblingFlowAndSession(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Removing one service changes the provider's effective revision; the
+	// sibling flow must survive because its own decision is unchanged.
 	h.b.mu.Lock()
 	delete(h.b.serve, "demo.workspace1.instance.example/alice")
 	for k, d := range h.b.serve {
-		d.PolicyRevision++
+		d.Revision++
 		h.b.serve[k] = d
 	}
+	office := h.b.agents["office"]
+	office.Effective.Revision++
+	office.Effective.Services = office.Effective.Services[1:]
+	h.b.agents["office"] = office
 	h.b.mu.Unlock()
 	h.b.changed()
 	select {
@@ -514,22 +554,27 @@ func TestRevocationCancelsPendingProviderOpen(t *testing.T) {
 	}
 }
 
-func TestPendingAccessAndStaleProviderRevision(t *testing.T) {
+func TestRevokedAgentIsRejectedAndRevisionChangesKeepSessions(t *testing.T) {
 	h := newHarness(t)
+	provider := h.provider(t, "office", "c", nil, func(s *connection.Stream) { <-s.Context().Done() })
 	h.b.mu.Lock()
-	client := h.b.agents["client"]
-	client.Status = "pending"
-	h.b.agents["client"] = client
 	office := h.b.agents["office"]
-	office.Approval.Revision = 2
+	office.Effective.Revision = 9
 	h.b.agents["office"] = office
+	client := h.b.agents["client"]
+	client.Status = api.StatusRevoked
+	h.b.agents["client"] = client
 	h.b.mu.Unlock()
-	if _, err := h.dial(t, "client", "", "client-token", "client-token", nil); err != nil {
-		t.Fatalf("pending provider approval blocked valid access identity: %v", err)
+	h.b.changed()
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-provider.Done():
+		t.Fatal("an effective revision change closed the provider session")
+	default:
 	}
-	if session, err := h.dial(t, "office", "c", "office-token", "office-token", permit); err == nil {
+	if session, err := h.dial(t, "client", "", "client-token", "client-token", nil); err == nil {
 		session.Close()
-		t.Fatal("stale provider configuration accepted")
+		t.Fatal("revoked agent admitted")
 	}
 }
 
@@ -777,11 +822,11 @@ func TestRollingLeaseThroughRealProviderManager(t *testing.T) {
 	h.b.mu.Lock()
 	h.b.decisionWindow = 180 * time.Millisecond
 	agent := h.b.agents["office"]
-	agent.Desired = local
-	agent.Approval.Services = map[string]string{"demo": origin.URL}
+	agent.Desired = local.AgentSpec()
+	agent.Effective.Services = []api.EffectiveService{{Name: "demo", Origin: origin.URL, Hostname: "demo.workspace1.instance.example"}}
 	h.b.agents["office"] = agent
 	h.b.mu.Unlock()
-	manager := orchestration.New(&local, agent.Approval)
+	manager := orchestration.New(&local, agent.Effective)
 	var authorizations atomic.Int32
 	provider := h.provider(t, "office", "c", func(ctx context.Context, p connection.Principal, r connection.OpenRequest) (connection.OpenClaims, error) {
 		authorizations.Add(1)

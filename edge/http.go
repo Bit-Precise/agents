@@ -15,6 +15,7 @@ import (
 
 	"github.com/bit-precise/agentd/connection"
 	"github.com/bit-precise/agentd/policy"
+	"github.com/bit-precise/agents/control/types"
 )
 
 func canonicalHost(authority string) (string, error) {
@@ -96,6 +97,34 @@ func GuardRequestBody(w http.ResponseWriter, r *http.Request) *http.Request {
 	return r
 }
 
+// IsServiceHost reports whether authority names a published service,
+// <service>.<workspace>.<baseDomain>. Platform paths such as /healthz and the
+// internal API are never routed for these hosts, so they cannot shadow the
+// paths of a tenant's service.
+func IsServiceHost(authority, baseDomain string) bool {
+	host, err := canonicalHost(authority)
+	suffix := "." + baseDomain
+	if err != nil || baseDomain == "" || !strings.HasSuffix(host, suffix) {
+		return false
+	}
+	return strings.Count(strings.TrimSuffix(host, suffix), ".") == 1
+}
+
+// serveFailure keeps a Control outage or an unknown host distinguishable from
+// an authorization denial; every failure still rejects the request.
+func serveFailure(err error) (int, string) {
+	switch types.KindOf(err) {
+	case string(types.KindNotFound):
+		return http.StatusNotFound, "unknown service"
+	case string(types.KindInvalid):
+		return http.StatusBadRequest, "invalid service request"
+	case string(types.KindUnavailable), "internal":
+		return http.StatusServiceUnavailable, "service unavailable"
+	default:
+		return http.StatusForbidden, "service access denied"
+	}
+}
+
 // ServeHTTP handles exactly one authorized HTTP request on one provider stream.
 // userID must come from the root gateway's authenticated browser session. An
 // empty userID is passed to control as anonymous; Edge never infers membership.
@@ -114,7 +143,12 @@ func (e *Edge) ServeHTTP(w http.ResponseWriter, r *http.Request, userID string) 
 		return
 	}
 	d, err := e.backend.ResolveServe(host, userID)
-	if err != nil || !validDecision(d, connection.PurposeServe) || d.Hostname != host {
+	if err != nil {
+		status, message := serveFailure(err)
+		http.Error(w, message, status)
+		return
+	}
+	if !validDecision(d, connection.PurposeServe) || d.Hostname != host {
 		http.Error(w, "service access denied", http.StatusForbidden)
 		return
 	}

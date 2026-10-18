@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bit-precise/agentd/config"
+	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/policy"
 	"github.com/bit-precise/agents/control/types"
 	"github.com/bit-precise/agents/edge"
@@ -97,15 +97,15 @@ func restRequire(t *testing.T, r *httptest.ResponseRecorder, status int, out any
 		}
 	}
 }
-func (f restFixture) enroll(t *testing.T, user types.User, name string, automatic bool) types.EnrollResponse {
+func (f restFixture) enroll(t *testing.T, user types.User, name string) types.EnrollResponse {
 	t.Helper()
-	_, key, err := f.app.State.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: user.ID, Roles: []string{"ingress", "serve", "egress"}, AutoApprove: automatic, MaxUses: 1})
+	_, key, err := f.app.State.CreateEnrollmentKey(f.admin.ID, types.EnrollmentKey{WorkspaceID: f.workspace.ID, UserID: user.ID, Roles: []string{"ingress", "serve", "egress"}, MaxUses: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	rule := policy.Rule{Domain: policy.Domain{Exact: "outbound.test"}, Ports: []int{443}, Protocol: "tls"}
-	desired := config.Config{APIVersion: "agents/v1alpha1", Kind: "AgentConfig", Instance: f.app.Config.ServerURL, Workspace: f.workspace.Name, Agent: config.AgentConfig{Name: name, StateDir: "./state"}, Transport: config.TransportConfig{Type: "xhttp", Mode: "packet-up", Endpoint: f.app.Config.EdgeURL}, Ingress: config.IngressConfig{Enabled: true, HTTP: config.ListenerConfig{Enabled: true, Listen: "127.0.0.1:18080"}, OnUnmatched: "reject", Routes: []policy.Rule{rule}}, Serve: config.ServeConfig{Enabled: true, Services: []config.ServiceConfig{{Name: name + "-app", Origin: "http://127.0.0.1:37842"}}}, Egress: config.EgressConfig{Enabled: true, Allow: []policy.Rule{rule}}}
-	result, err := f.app.State.Enroll(types.EnrollRequest{EnrollmentKey: key, Config: desired})
+	desired := api.AgentSpec{Ingress: api.IngressSpec{Enabled: true}, Serve: api.ServeSpec{Enabled: true, Services: []api.ServiceSpec{{Name: name + "-app", Origin: "http://127.0.0.1:37842"}}}, Egress: api.EgressSpec{Enabled: true, Allow: []policy.Rule{rule}}}
+	result, err := f.app.State.Enroll(types.EnrollRequest{EnrollmentKey: key, Instance: f.app.Config.ServerURL, Endpoint: f.app.Config.EdgeURL, Workspace: f.workspace.Name, Name: name, Desired: desired})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +119,8 @@ type restPage[T any] struct {
 
 func TestRESTAuthorizationScopesAndRemovedPaths(t *testing.T) {
 	f := newRESTFixture(t)
-	alice := f.enroll(t, f.alice, "alice-device", true)
-	bob := f.enroll(t, f.bob, "bob-device", true)
+	alice := f.enroll(t, f.alice, "alice-device")
+	bob := f.enroll(t, f.bob, "bob-device")
 	for _, resource := range []string{"users", "workspaces", "agents", "servers", "routes", "memberships", "enrollment-keys", "grants", "audit-events", "connections", "flows", "ingresses", "egresses"} {
 		restRequire(t, f.request(t, "GET", "/v1/admin/"+resource, "", nil), 401, nil)
 		restRequire(t, f.request(t, "GET", "/v1/admin/"+resource, f.aliceToken, nil), 403, nil)
@@ -154,7 +154,7 @@ func TestRESTAuthorizationScopesAndRemovedPaths(t *testing.T) {
 func TestRESTPaginationFiltersAndStrictQuery(t *testing.T) {
 	f := newRESTFixture(t)
 	for _, name := range []string{"c-device", "a-device", "b-device"} {
-		f.enroll(t, f.alice, name, true)
+		f.enroll(t, f.alice, name)
 	}
 	base := "/v1/workspaces/" + f.workspace.ID + "/agents"
 	ids := []string{}
@@ -190,7 +190,7 @@ func TestRESTPaginationFiltersAndStrictQuery(t *testing.T) {
 
 func TestRESTRoleViewsAndRoutesKeepOriginsPrivate(t *testing.T) {
 	f := newRESTFixture(t)
-	provider := f.enroll(t, f.bob, "provider", true)
+	provider := f.enroll(t, f.bob, "provider")
 	base := "/v1/workspaces/" + f.workspace.ID
 	var servers restPage[ServerView]
 	response := f.request(t, "GET", base+"/servers", f.aliceToken, nil)
@@ -198,7 +198,7 @@ func TestRESTRoleViewsAndRoutesKeepOriginsPrivate(t *testing.T) {
 	if len(servers.Items) != 1 || servers.Items[0].Agent.ID != provider.Agent.ID || servers.Items[0].Agent.Name != "provider" {
 		t.Fatalf("server role view: %+v", servers)
 	}
-	for _, secret := range []string{"private-origin", "37842", "\"desired\"", "\"approval\"", "\"origin\""} {
+	for _, secret := range []string{"private-origin", "37842", "\"desired\"", "\"effective\"", "\"origin\""} {
 		if strings.Contains(response.Body.String(), secret) {
 			t.Fatalf("server catalogue leaked %q", secret)
 		}
@@ -241,42 +241,26 @@ func TestRESTRoleViewsAndRoutesKeepOriginsPrivate(t *testing.T) {
 	restRequire(t, f.request(t, "POST", base+"/routes", f.bobToken, map[string]any{"kind": "serve"}), 400, nil)
 }
 
-func TestRESTApprovalBindsReviewedDesiredAndSupportsActivePending(t *testing.T) {
+func TestRESTHasNoApprovalAndShowsAutomaticEffectiveConfig(t *testing.T) {
 	f := newRESTFixture(t)
-	enrolled := f.enroll(t, f.alice, "pending-device", true)
-	previous := enrolled.Agent.Desired
-	changed := previous
-	changed.Serve.Services = slices.Clone(previous.Serve.Services)
+	enrolled := f.enroll(t, f.alice, "device")
+	for _, path := range []string{"/v1/admin/agents/" + enrolled.Agent.ID + "/approval", "/v1/workspaces/" + f.workspace.ID + "/agents/" + enrolled.Agent.ID + "/approval"} {
+		if code := f.request(t, "PUT", path, restBootstrap, map[string]any{"expectedDesired": enrolled.Agent.Desired}).Code; code != 404 && code != 405 {
+			t.Fatalf("removed approval endpoint %s answered %d", path, code)
+		}
+	}
+	changed := enrolled.Agent.Desired.Clone()
 	changed.Serve.Services[0].Origin = "http://127.0.0.1:37843"
-	updated, err := f.app.State.UpdateAgent(enrolled.Credentials.ControlToken, changed)
-	if err != nil {
+	if _, err := f.app.State.UpdateAgent(enrolled.Credentials.ControlToken, api.ConfigUpdate{Workspace: f.workspace.Name, Name: "device", Desired: changed}); err != nil {
 		t.Fatal(err)
 	}
-	if updated.Status != "active" || !updated.PendingApproval {
-		t.Fatalf("expected active pending agent: %+v", updated)
+	response := f.request(t, "GET", "/v1/admin/agents/"+enrolled.Agent.ID, restBootstrap, nil)
+	var detail api.Agent
+	restRequire(t, response, 200, &detail)
+	if strings.Contains(response.Body.String(), "pendingApproval") || detail.Status != api.StatusActive || detail.Effective.Revision != enrolled.Agent.Effective.Revision+1 || detail.Effective.Services[0].Origin != "http://127.0.0.1:37843" {
+		t.Fatalf("automatic update not visible as the effective configuration: %s", response.Body.String())
 	}
-	path := "/v1/admin/agents/" + enrolled.Agent.ID + "/approval"
-	before, err := f.app.State.SnapshotForUser(f.admin.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	restRequire(t, f.request(t, "PUT", path, restBootstrap, map[string]any{"expectedDesired": previous}), 409, nil)
-	after, _ := f.app.State.SnapshotForUser(f.admin.ID)
-	if after.Revision != before.Revision {
-		t.Fatal("stale approval changed persistent state")
-	}
-	var approved types.Agent
-	restRequire(t, f.request(t, "PUT", path, restBootstrap, map[string]any{"expectedDesired": updated.Desired}), 200, &approved)
-	if approved.PendingApproval || approved.Approval.Services["pending-device-app"] != changed.Serve.Services[0].Origin {
-		t.Fatal("active pending config was not approved")
-	}
-	after, _ = f.app.State.SnapshotForUser(f.admin.ID)
-	restRequire(t, f.request(t, "PUT", path, restBootstrap, map[string]any{"expectedDesired": updated.Desired}), 200, &approved)
-	repeated, _ := f.app.State.SnapshotForUser(f.admin.ID)
-	if repeated.Revision != after.Revision {
-		t.Fatal("repeated approval was not idempotent")
-	}
-	restRequire(t, f.request(t, "PUT", path, restBootstrap, map[string]any{}), 400, nil)
+	restRequire(t, f.request(t, "POST", "/v1/admin/enrollment-keys", restBootstrap, map[string]any{"workspaceId": f.workspace.ID, "roles": []string{"ingress"}, "autoApprove": true}), 400, nil)
 }
 
 func TestRESTSessionsCSRFAndStrictCreation(t *testing.T) {
@@ -336,7 +320,7 @@ func TestRESTSessionsCSRFAndStrictCreation(t *testing.T) {
 
 func TestRESTTelemetryConsumerVisibilityAndUnavailable(t *testing.T) {
 	f := newRESTFixture(t)
-	provider := f.enroll(t, f.alice, "exit", true)
+	provider := f.enroll(t, f.alice, "exit")
 	status := edge.Snapshot{Connections: []edge.ConnectionStatus{{ID: "provider-connection", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, Role: "provider"}}, Flows: []edge.FlowStatus{{ID: "alice-flow", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, UserID: f.alice.ID, Purpose: "egress"}, {ID: "bob-flow", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, UserID: f.bob.ID, Purpose: "egress"}, {ID: "anonymous-flow", WorkspaceID: f.workspace.ID, AgentID: provider.Agent.ID, Purpose: "serve"}}}
 	telemetry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, status) }))
 	defer telemetry.Close()
@@ -407,8 +391,8 @@ func TestRESTServeRouteUsesDevelopmentPort(t *testing.T) {
 
 func TestRESTDeveloperCanReadAndRevokeOwnServiceGrants(t *testing.T) {
 	f := newRESTFixture(t)
-	alice := f.enroll(t, f.alice, "alice-grants", true)
-	bob := f.enroll(t, f.bob, "bob-grants", true)
+	alice := f.enroll(t, f.alice, "alice-grants")
+	bob := f.enroll(t, f.bob, "bob-grants")
 	snap, err := f.app.State.SnapshotForUser(f.admin.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -456,23 +440,23 @@ func TestRESTDeveloperCanReadAndRevokeOwnServiceGrants(t *testing.T) {
 	}
 }
 
-func TestRESTRoleStatusUsesEffectiveApprovalAndOwnerState(t *testing.T) {
+func TestRESTRoleStatusUsesEffectiveConfigAndOwnerState(t *testing.T) {
 	f := newRESTFixture(t)
-	enrolled := f.enroll(t, f.bob, "role-projection", true)
-	next := enrolled.Agent.Desired
-	next.Egress.Allow = []policy.Rule{{Domain: policy.Domain{Exact: "unapproved.test"}, Ports: []int{443}, Protocol: "tls"}}
-	updated, err := f.app.State.UpdateAgent(enrolled.Credentials.ControlToken, next)
+	enrolled := f.enroll(t, f.bob, "role-projection")
+	next := enrolled.Agent.Desired.Clone()
+	next.Egress.Enabled = false
+	updated, err := f.app.State.UpdateAgent(enrolled.Credentials.ControlToken, api.ConfigUpdate{Workspace: f.workspace.Name, Name: "role-projection", Desired: next})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !updated.PendingApproval || len(updated.Approval.Egress) != 0 {
-		t.Fatal("fixture did not narrow effective approval")
+	if len(updated.Effective.Egress) != 0 {
+		t.Fatal("fixture did not narrow the effective configuration")
 	}
 	base := "/v1/workspaces/" + f.workspace.ID
 	var role AgentRoleView
 	restRequire(t, f.request(t, "GET", base+"/egresses/"+enrolled.Agent.ID, f.bobToken, nil), 200, &role)
-	if role.Enabled || role.Status != "active" || !role.Agent.PendingApproval {
-		t.Fatalf("raw approval incorrectly enabled unapproved egress: %+v", role)
+	if role.Enabled || role.Status != "active" || role.EffectiveRevision != updated.Effective.Revision {
+		t.Fatalf("role view enabled egress outside the effective configuration: %+v", role)
 	}
 	if err = f.app.State.DisableUser(f.admin.ID, f.bob.ID); err != nil {
 		t.Fatal(err)
@@ -496,19 +480,19 @@ func TestRESTRoleStatusUsesEffectiveApprovalAndOwnerState(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, viewer := range []struct{ path, token string }{{"/v1/admin/agents", restBootstrap}, {base + "/agents", f.aliceToken}} {
-		var list restPage[types.Agent]
+		var list restPage[api.Agent]
 		restRequire(t, f.request(t, "GET", viewer.path+"?status=revoked", viewer.token, nil), 200, &list)
 		if list.Pagination.Total != 1 || len(list.Items) != 1 || list.Items[0].ID != enrolled.Agent.ID || list.Items[0].Status != "revoked" {
-			t.Fatalf("agent list used persisted instead of effective status: %+v", list)
+			t.Fatalf("agent list did not show the stored revocation: %+v", list)
 		}
-		var detail types.Agent
+		var detail api.Agent
 		restRequire(t, f.request(t, "GET", viewer.path+"/"+enrolled.Agent.ID, viewer.token, nil), 200, &detail)
-		if detail.Status != "revoked" || len(detail.Approval.Services) != 0 || len(detail.Approval.Egress) != 0 || detail.Desired.Agent.Name != next.Agent.Name {
+		if detail.Status != "revoked" || len(detail.Effective.Services) != 0 || len(detail.Effective.Egress) != 0 || detail.Name != "role-projection" {
 			t.Fatalf("agent detail projection inconsistent: %+v", detail)
 		}
 		restRequire(t, f.request(t, "GET", viewer.path+"?status=active", viewer.token, nil), 200, &list)
 		if list.Pagination.Total != 0 || len(list.Items) != 0 {
-			t.Fatal("status filter retained effectively revoked agent")
+			t.Fatal("status filter retained a revoked agent")
 		}
 	}
 }

@@ -16,16 +16,19 @@ import (
 )
 
 type Gateway struct {
-	Edge     *edge.Edge
-	backend  *controlrpc.Client
-	endpoint *url.URL
-	internal http.Handler
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	once     sync.Once
+	Edge       *edge.Edge
+	backend    *controlrpc.Client
+	endpoint   *url.URL
+	baseDomain string
+	internal   http.Handler
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	once       sync.Once
 }
 
-func New(ctx context.Context, controlURL, edgeURL, token string, cfg edge.Config) (*Gateway, error) {
+// baseDomain identifies published service hosts, which always reach the
+// service even on platform paths such as /healthz.
+func New(ctx context.Context, controlURL, edgeURL, baseDomain, token string, cfg edge.Config) (*Gateway, error) {
 	endpoint, err := url.Parse(edgeURL)
 	if err != nil || endpoint.Host == "" || endpoint.Path != "/agent" {
 		return nil, errors.New("edgeURL must identify the public /agent endpoint")
@@ -40,7 +43,7 @@ func New(ctx context.Context, controlURL, edgeURL, token string, cfg edge.Config
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	g := &Gateway{Edge: e, backend: backend, endpoint: endpoint, cancel: cancel}
+	g := &Gateway{Edge: e, backend: backend, endpoint: endpoint, baseDomain: baseDomain, cancel: cancel}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+controlrpc.Prefix+"snapshot", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -69,14 +72,16 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	if r.URL.Path == "/healthz" {
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte("ok\n"))
-		return
-	}
-	if strings.HasPrefix(r.URL.Path, controlrpc.Prefix) {
-		g.internal.ServeHTTP(w, r)
-		return
+	if !edge.IsServiceHost(r.Host, g.baseDomain) {
+		if r.URL.Path == "/healthz" {
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte("ok\n"))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, controlrpc.Prefix) {
+			g.internal.ServeHTTP(w, r)
+			return
+		}
 	}
 	if r.URL.Path == "/agent" && sameAuthority(r.Host, g.endpoint) {
 		g.Edge.Handler().ServeHTTP(w, r)

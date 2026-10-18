@@ -93,12 +93,13 @@ func (e *Edge) beginFlow(parent context.Context, d types.Decision, purpose conne
 	}
 	e.mu.Lock()
 	p := e.providers[d.AgentID]
-	if e.closed || len(e.flows) >= e.cfg.MaxFlows {
+	if e.closed || len(e.flows) >= e.cfg.MaxFlows || e.workspaceFlowsLocked(d.WorkspaceID) >= e.cfg.MaxFlowsPerWorkspace {
 		e.mu.Unlock()
 		return nil, nil, ErrUnavailable
 	}
-	if p == nil || p.session == nil || p.identity.WorkspaceID != d.WorkspaceID || p.revision != d.Revision ||
-		(purpose == connection.PurposeServe && !p.services[d.ServiceName]) || (purpose == connection.PurposeEgress && !p.egress) {
+	// The decision already proves the service or destination is in the
+	// provider's current effective configuration; the session only carries it.
+	if p == nil || p.session == nil || p.identity.WorkspaceID != d.WorkspaceID {
 		e.mu.Unlock()
 		return nil, nil, ErrUnavailable
 	}
@@ -184,10 +185,22 @@ func (e *Edge) armLeaseLocked(f *flow, expiry time.Time) {
 	})
 }
 
+func (e *Edge) workspaceFlowsLocked(workspaceID string) int {
+	count := 0
+	for _, f := range e.flows {
+		if f.decision.WorkspaceID == workspaceID {
+			count++
+		}
+	}
+	return count
+}
+
+// sameDecision compares what a flow is allowed to do, not the effective
+// revision: a provider's unrelated configuration change keeps this flow.
 func sameDecision(old, next types.Decision, deadline time.Time) bool {
 	return old.ResourceType == next.ResourceType && old.ResourceID == next.ResourceID && old.WorkspaceID == next.WorkspaceID && old.Workspace == next.Workspace &&
 		old.AgentID == next.AgentID && old.ServiceName == next.ServiceName && old.Hostname == next.Hostname && old.UserID == next.UserID &&
-		old.Destination == next.Destination && old.Revision == next.Revision && !next.ExpiresAt.Before(deadline)
+		old.Destination == next.Destination && !next.ExpiresAt.Before(deadline)
 }
 
 func (e *Edge) authorizedFlow(f *flow) (types.Decision, bool) {
@@ -206,8 +219,7 @@ func (e *Edge) authorizedFlow(f *flow) (types.Decision, bool) {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return d, !e.closed && !f.leaseExpired && f.ctx.Err() == nil && f.deadline.After(time.Now()) && sameDecision(f.decision, d, f.deadline) && e.providers[f.decision.AgentID] == f.provider && f.provider.revision == d.Revision &&
-		(f.purpose != connection.PurposeServe || f.provider.services[d.ServiceName]) && (f.purpose != connection.PurposeEgress || f.provider.egress)
+	return d, !e.closed && !f.leaseExpired && f.ctx.Err() == nil && f.deadline.After(time.Now()) && sameDecision(f.decision, d, f.deadline) && e.providers[f.decision.AgentID] == f.provider
 }
 
 func (e *Edge) recheckFlow(f *flow) bool { _, ok := e.authorizedFlow(f); return ok }
@@ -250,7 +262,7 @@ func (e *Edge) openProvider(f *flow) (*connection.Stream, error) {
 func (e *Edge) handleAccess(access *provider, incoming *connection.Stream) {
 	claims := incoming.Claims()
 	d, err := e.backend.ResolveEgress(access.identity.Workspace, access.identity.UserID, claims.Destination.Host, int(claims.Destination.Port))
-	if err != nil || d.ResourceID != claims.Resource || d.Revision != claims.Revision || d.Destination != claims.Destination || !e.currentIdentity(access) {
+	if err != nil || d.ResourceID != claims.Resource || d.Destination != claims.Destination || !e.currentIdentity(access) {
 		return
 	}
 	d.ExpiresAt = minExpiry(d.ExpiresAt, claims.Deadline)
