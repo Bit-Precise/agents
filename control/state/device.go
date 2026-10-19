@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/bit-precise/agentd/api"
+	"github.com/bit-precise/agents/control/authz"
 	"github.com/bit-precise/agents/control/types"
 )
 
@@ -54,7 +55,7 @@ func ownAuthorization(snap *types.Snapshot, actorID, id, want string) (*types.En
 // checkSelection is the permission check for a Device Flow choice, repeated
 // at confirmation, consent and exchange so a demotion in between fails closed.
 // A person may choose only themselves, and only in a Workspace they belong
-// to; a Service Account requires maintainer+ of its Workspace or admin.
+// to; a Service Account requires authz.ManageServiceAccounts there.
 func checkSelection(snap *types.Snapshot, actorID, workspaceID string, p api.Principal) error {
 	if _, err := requireUser(snap, actorID); err != nil {
 		return err
@@ -68,7 +69,7 @@ func checkSelection(snap *types.Snapshot, actorID, workspaceID string, p api.Pri
 		if p.ID != actorID {
 			return problem(types.KindForbidden, "a device can run as yourself or as a service account, never as another user")
 		}
-		if member(snap, w.ID, actorID) == nil {
+		if authz.MemberRole(snap, actorID, w.ID) == authz.None {
 			return problem(types.KindForbidden, "workspace membership required")
 		}
 	case api.PrincipalServiceAccount:
@@ -77,7 +78,7 @@ func checkSelection(snap *types.Snapshot, actorID, workspaceID string, p api.Pri
 			return problem(types.KindNotFound, "service account not found in this workspace")
 		}
 		if !canChooseServiceAccount(snap, actorID, sa) {
-			return problem(types.KindForbidden, "only workspace maintainers and owners can register devices as a service account")
+			return authz.Denied(authz.ManageServiceAccounts)
 		}
 	default:
 		return problem(types.KindInvalid, "principal must be a user or a service account")
@@ -136,7 +137,7 @@ type DeviceAuthorizationView struct {
 
 // DeviceAuthorization lists the selections the actor may make right now.
 // The personal Workspace comes first; Service Accounts appear only where the
-// actor is maintainer+ (or for an instance admin, in any Workspace).
+// actor holds authz.ManageServiceAccounts (an instance admin, in any Workspace).
 func (s *State) DeviceAuthorization(actorID, id string) (DeviceAuthorizationView, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

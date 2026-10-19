@@ -9,7 +9,7 @@ import { OptionSelect } from "@/components/data-table";
 import { ResourcePicker } from "@/components/resource-picker";
 import { FormDialog } from "./form-dialog";
 import { localTime, rule } from "@/lib/format";
-import { useUser } from "@/lib/session";
+import { useUser, useWorkspace } from "@/lib/session";
 
 export function RouteDialog({
   workspaceId,
@@ -169,22 +169,27 @@ export function RouteDialog({
 
 type Subject = CreateWorkspaceGrant["subjectType"];
 
+// GrantDialog adds a data-plane grant. Which resources and subjects it offers
+// follows the viewer's control-plane permissions (docs/authorization.md).
 export function GrantDialog({
   workspaceId,
   resource,
-  manager,
   onClose,
   onDone,
 }: {
   workspaceId: string;
   resource?: { type: "service" | "egress"; id: string; label: string };
-  manager: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
   const viewer = useUser();
+  const { can } = useWorkspace();
+  const external = can("grants.share_external");
   const [resourceType, setResourceType] = useState<"service" | "egress">(
-    resource?.type ?? "service",
+    resource?.type ??
+      (can("services.manage_own") || !can("egress_routes.manage")
+        ? "service"
+        : "egress"),
   );
   const [resourceID, setResourceID] = useState(resource?.id ?? "");
   const [resourceLabel, setResourceLabel] = useState(resource?.label ?? "");
@@ -202,11 +207,17 @@ export function GrantDialog({
       disabled: resourceType !== "egress",
     },
     {
+      value: "authenticated",
+      label: "所有已登录用户（仅服务）",
+      disabled: resourceType !== "service" || !external,
+    },
+    {
       value: "anonymous",
       label: "匿名访问者（仅服务）",
-      disabled: resourceType !== "service" || !manager,
+      disabled: resourceType !== "service" || !external,
     },
   ];
+  const noSubject = subjectType === "anonymous" || subjectType === "authenticated";
   return (
     <FormDialog
       title="添加访问授权"
@@ -216,7 +227,7 @@ export function GrantDialog({
       onClose={onClose}
       onSubmit={async () => {
         const subject = subjectType === "workspace" ? workspaceId : subjectID;
-        if (!resourceID || (!subject && subjectType !== "anonymous"))
+        if (!resourceID || (!subject && !noSubject))
           throw new Error("请选择资源与授权对象。");
         if (
           new Date(expires) <= new Date(starts) ||
@@ -230,7 +241,7 @@ export function GrantDialog({
               resourceType,
               resourceId: resourceID,
               subjectType,
-              subjectId: subjectType === "anonymous" ? undefined : subject,
+              subjectId: noSubject ? undefined : subject,
               startsAt: new Date(starts).toISOString(),
               expiresAt: new Date(expires).toISOString(),
             },
@@ -242,7 +253,7 @@ export function GrantDialog({
         onDone();
       }}
     >
-      <div className="grid grid-cols-[10rem_1fr] gap-4">
+      <div className="grid grid-cols-[13rem_1fr] gap-4">
         <Field>
           <FieldLabel htmlFor="grant-resource-type">资源类型</FieldLabel>
           <OptionSelect
@@ -257,8 +268,16 @@ export function GrantDialog({
               setSubjectType("user");
             }}
             options={[
-              { value: "service", label: "服务" },
-              { value: "egress", label: "出口路由" },
+              {
+                value: "service",
+                label: "服务",
+                disabled: !can("services.manage_own"),
+              },
+              {
+                value: "egress",
+                label: "出口路由",
+                disabled: !can("egress_routes.manage"),
+              },
             ]}
           />
         </Field>
@@ -314,7 +333,7 @@ export function GrantDialog({
           />
         </Field>
       </div>
-      <div className="grid grid-cols-[10rem_1fr] gap-4">
+      <div className="grid grid-cols-[13rem_1fr] gap-4">
         <Field>
           <FieldLabel htmlFor="grant-subject-type">授权对象</FieldLabel>
           <OptionSelect
@@ -330,11 +349,11 @@ export function GrantDialog({
           />
         </Field>
         <Field>
-          <FieldLabel>
-            {subjectType === "anonymous" ? "范围" : "对象"}
-          </FieldLabel>
+          <FieldLabel>{noSubject ? "范围" : "对象"}</FieldLabel>
           {subjectType === "anonymous" ? (
             <Input readOnly value="任何人，无需登录" />
+          ) : subjectType === "authenticated" ? (
+            <Input readOnly value="本实例任何已登录的用户" />
           ) : subjectType === "workspace" ? (
             <Input readOnly value="本工作空间的全部成员（不含服务账号）" />
           ) : (
@@ -349,7 +368,7 @@ export function GrantDialog({
               search={async (q, signal) =>
                 subjectType === "user"
                   ? result(
-                      viewer.admin && manager
+                      viewer.admin && external
                         ? await sdk.listAdminUsers({
                             query: {
                               q: q || undefined,

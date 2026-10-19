@@ -116,8 +116,8 @@ func TestPostgresPersistenceAndConstraints(t *testing.T) {
 }
 
 // TestPostgresPrincipalMigrationOfExistingData migrates populated version-2
-// tables, so the ALTERs, the replaced grant subject constraints and the
-// payload rewrite run against real rows.
+// tables through version 5, so the ALTERs, the replaced grant subject
+// constraints and the payload rewrite run against real rows.
 func TestPostgresPrincipalMigrationOfExistingData(t *testing.T) {
 	options, scoped := postgresSchema(t)
 	statements := append(append([]string(nil), schema...),
@@ -152,7 +152,7 @@ func TestPostgresPrincipalMigrationOfExistingData(t *testing.T) {
 		t.Fatalf("legacy rows did not migrate to user principals: %+v", snap)
 	}
 	var version int
-	if err = scoped.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 4 {
+	if err = scoped.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 5 {
 		t.Fatalf("schema version %d: %v", version, err)
 	}
 	// The new principal and grant subject are usable on the migrated tables.
@@ -172,6 +172,8 @@ func TestPostgresPrincipalMigrationOfExistingData(t *testing.T) {
 		"INSERT INTO agents(id,workspace_id,user_id,service_account_id,name,payload) VALUES('both','w','dev','sa','both','{}')",
 		"INSERT INTO enrollment_keys(id,workspace_id,user_id,service_account_id,payload) VALUES('k2','w','dev','sa','{}')",
 		"INSERT INTO grants(id,workspace_id,resource_type,route_id,subject_type,subject_user_id,subject_service_account_id,payload) VALUES('mixed','w','egress','r','service_account','dev','sa','{}')",
+		"INSERT INTO grants(id,workspace_id,resource_type,route_id,subject_type,payload) VALUES('exit','w','egress','r','authenticated','{}')",
+		"INSERT INTO grants(id,workspace_id,resource_type,service_id,subject_type,subject_user_id,payload) VALUES('named','w','service','s','authenticated','dev','{}')",
 	} {
 		if _, err := scoped.Exec(statement); err == nil {
 			t.Fatalf("migrated constraints accepted %s", statement)
@@ -179,6 +181,9 @@ func TestPostgresPrincipalMigrationOfExistingData(t *testing.T) {
 	}
 	if _, err := scoped.Exec("INSERT INTO grants(id,workspace_id,resource_type,route_id,subject_type,subject_service_account_id,payload) VALUES('valid','w','egress','r','service_account','sa','{}')"); err != nil {
 		t.Fatalf("a service account grant row was refused: %v", err)
+	}
+	if _, err := scoped.Exec("INSERT INTO grants(id,workspace_id,resource_type,service_id,subject_type,payload) VALUES('everyone','w','service','s','authenticated','{}')"); err != nil {
+		t.Fatalf("an authenticated grant row was refused: %v", err)
 	}
 	cross := next
 	cross.Revision = 11

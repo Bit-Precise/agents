@@ -43,9 +43,11 @@ erDiagram
 - 同一 SA 的多个 Agent 共享该 SA 的业务授权，但有不同 Agent ID、凭据、生效配置版本、连接和撤销边界。单设备凭据隔离不等于同 SA 的业务权限隔离。
 - `createdByUserId`、`actorUserId` 和设备请求的 actor 单独记录。SA 创建者离职或降权不自动停止已获准的团队设备。
 
-个人设备可以使用本人身份；服务器用途的 profile 必须使用 SA。Device Flow 同时提供本人/SA 选择，选择 SA 后就是机器 profile。服务器安装入口和 Control 的注册策略必须拒绝 User 主体的 server profile；不能仅凭操作系统、主机名或客户端自报硬件类型声称识别了所有物理服务器。
+设备类别由运行主体决定：以本人 User 运行即个人设备，以 SA 运行即团队设备。系统不判断机器是笔记本还是服务器，也不设“服务器必须使用 SA”的强制规则：操作系统、主机名或客户端自报的硬件类型都不可靠，由客户端自行声明“服务器用途”又可被绕过。团队长期运行的服务器应使用 SA（注册密钥只能绑定 SA，Device Flow 中也可选择 SA），否则操作人离开 Workspace 后设备随其 User 主体一起失效。
 
 ## 2. 权限与身份选择
+
+当前实现的完整权限矩阵以 [授权模型](authorization.md) 为准；本节说明身份选择相关的设计约束。
 
 | 操作 | instance admin | owner / maintainer | developer | guest |
 |---|---|---|---|---|
@@ -195,12 +197,13 @@ Grant 新增显式 `service_account` subject，稳定 ID 指向 SA：
 | `service_account` | 对应 SA 主体；同 SA 的多个 Agent 共享这份主体授权，仍受各设备能力限制 |
 | `workspace` | 保留现有语义：该 Workspace 的有效人类成员，不自动扩大为其中所有 SA |
 | `anonymous` | 仅现有明确允许匿名访问的 Serve 路径，不能成为出口授权 |
+| `authenticated` | 本实例任何已登录、未停用的 User；与 `anonymous` 一样只用于 Serve，属于对外分享 |
 
 Egress 仍要求请求主体与路由在同一 Workspace：User 通过 Membership，SA 通过其固定 Workspace 归属。不能合并 Workspace 中所有 User 的 Grant 给一台 ingress，也不能让 SA 使用其创建者/操作人的 User Grant。
 
 Serve 的提供方可以是 User 或 SA Agent；访问服务的浏览器仍是独立的 User/anonymous 消费者，不能被替换为 provider 的主体。现有浏览器 Serve 入口不接受设备或注册 Token。机器消费受保护 Serve 的路径必须显式支持 typed principal 和独立的业务凭据用途，方可开放该路径上的 SA Grant；不能通过接受 provider/control/access Token 作为浏览器用户来补齐。
 
-管理 REST 权限与业务 Grant 独立。developer 对“自己的设备/服务”的判断改为 `principal.type == user && principal.id == actor.id`；管理 SA 设备要求 manager 权限。`createdByUserId` 永远不参加这类权限判断。
+管理 REST 权限（控制面 RBAC）与业务 Grant（数据面）独立，见 [授权模型](authorization.md)。developer 对“自己的设备/服务”的判断改为 `principal.type == user && principal.id == actor.id`；管理 SA 设备要求 manager 权限。`createdByUserId` 永远不参加这类权限判断。
 
 ## 7. 生命周期与撤销
 
@@ -294,4 +297,4 @@ Helm values 区分上游 `oidc` 与本实例 `hydra` 配置，不能把上游 OI
 - **页面**：Control 全局 `Referrer-Policy: no-referrer` 会让浏览器在表单提交时发送 `Origin: null`，验证码页因此改用 `same-origin`。login challenge 约 1–2 KiB，长度上限按 4 KiB 处理。
 - **会话**：可复用的人类会话必须来自上游 OIDC 登录；没有 OIDC 时只在 `developmentHTTP` 实例接受粘贴令牌的会话，配置校验在其他情况下拒绝启用 `hydra`。
 
-尚未实现：注册响应丢失后的受控恢复（目前由本人撤销残留设备后重新 `agentd login`）、产品内撤销已兑换授权时同步撤销 Hydra grant/AT（AT 5 分钟后自然失效，已消费授权不能再兑换）、保存 AT 指纹，以及服务器安装入口对 User 主体 server profile 的拒绝。
+尚未实现：注册响应丢失后的受控恢复（目前由本人撤销残留设备后重新 `agentd login`）、产品内撤销已兑换授权时同步撤销 Hydra grant/AT（AT 5 分钟后自然失效，已消费授权不能再兑换），以及保存 AT 指纹。

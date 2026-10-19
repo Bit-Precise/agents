@@ -66,7 +66,7 @@ import { rememberNames, useEntity } from "@/lib/names";
 import { usePage, useTableState } from "@/lib/use-page";
 import { isSelf, roleNames, rule, short, time } from "@/lib/format";
 import { useQueryParam } from "@/lib/router";
-import { useUser, useWorkspace } from "@/lib/session";
+import { membershipPermission, useUser, useWorkspace } from "@/lib/session";
 
 function RowMenu({ children }: { children: React.ReactNode }) {
   return (
@@ -243,14 +243,16 @@ export function OverviewPage() {
 }
 
 export function MembersPage() {
-  const { workspace, manager } = useWorkspace();
+  const { workspace, can } = useWorkspace();
   const [tab, setTab] = useQueryParam("tab", "members");
   const [creating, setCreating] = useState<
     "member" | "serviceAccount" | "key" | null
   >(null);
   const [version, setVersion] = useState(0);
   const reload = () => setVersion((v) => v + 1);
-  const actions = manager && (
+  const actions = can(
+    tab === "members" ? "members.manage" : "service_accounts.manage",
+  ) && (
     <Button
       onClick={() =>
         setCreating(
@@ -285,7 +287,7 @@ export function MembersPage() {
         </TabsList>
       </Tabs>
       {tab === "service-accounts" ? (
-        manager ? (
+        can("service_accounts.manage") ? (
           <ServiceAccountsTable key={version} />
         ) : (
           <Alert>
@@ -326,7 +328,7 @@ export function MembersPage() {
 
 function MembershipsTable() {
   const viewer = useUser();
-  const { workspace, manager } = useWorkspace();
+  const { workspace, can } = useWorkspace();
   const { confirm } = useFeedback();
   const table = useTableState();
   const [role, setRole] = useState("all");
@@ -361,7 +363,7 @@ function MembershipsTable() {
       header: "",
       className: "w-10",
       cell: (m) =>
-        manager && (
+        can(membershipPermission(m.role)) && (
           <RowMenu>
             <DropdownMenuItem onClick={() => setEditing(m)}>
               修改角色
@@ -601,7 +603,7 @@ function ServiceAccountsTable() {
 
 function EnrollmentKeysTable() {
   const viewer = useUser();
-  const { workspace, manager } = useWorkspace();
+  const { workspace, can } = useWorkspace();
   const { confirm } = useFeedback();
   const table = useTableState();
   const [revoked, setRevoked] = useState("false");
@@ -669,7 +671,7 @@ function EnrollmentKeysTable() {
       className: "w-10",
       cell: (k) =>
         !k.revoked &&
-        (manager || k.userId === viewer.id) && (
+        (can("service_accounts.manage") || k.userId === viewer.id) && (
           <RowMenu>
             <DropdownMenuItem
               variant="destructive"
@@ -739,7 +741,7 @@ function EnrollmentKeysTable() {
 }
 
 export function AgentsPage() {
-  const { workspace, manager } = useWorkspace();
+  const { workspace, can } = useWorkspace();
   const [registering, setRegistering] = useState(false);
   return (
     <>
@@ -754,7 +756,7 @@ export function AgentsPage() {
         }
       />
       <AgentsTable
-        scope={{ admin: false, workspaceId: workspace.id, manager }}
+        scope={{ admin: false, workspaceId: workspace.id, can }}
       />
       {registering && (
         <RegisterDeviceDialog
@@ -768,7 +770,7 @@ export function AgentsPage() {
 }
 
 export function IngressesPage() {
-  const { workspace, manager } = useWorkspace();
+  const { workspace, can } = useWorkspace();
   return (
     <>
       <PageHeader
@@ -777,14 +779,14 @@ export function IngressesPage() {
       />
       <RoleViewsTable
         role="ingress"
-        scope={{ admin: false, workspaceId: workspace.id, manager }}
+        scope={{ admin: false, workspaceId: workspace.id, can }}
       />
     </>
   );
 }
 
 export function EgressesPage() {
-  const { workspace, manager } = useWorkspace();
+  const { workspace, can } = useWorkspace();
   return (
     <>
       <PageHeader
@@ -793,14 +795,14 @@ export function EgressesPage() {
       />
       <RoleViewsTable
         role="egress"
-        scope={{ admin: false, workspaceId: workspace.id, manager }}
+        scope={{ admin: false, workspaceId: workspace.id, can }}
       />
     </>
   );
 }
 
 export function ServersPage() {
-  const { workspace, manager } = useWorkspace();
+  const { workspace, can } = useWorkspace();
   return (
     <>
       <PageHeader
@@ -808,7 +810,7 @@ export function ServersPage() {
         description="设备发布的服务。访问者需要有效授权，删除授权不会退回全员访问。"
       />
       <ServersTable
-        scope={{ admin: false, workspaceId: workspace.id, manager }}
+        scope={{ admin: false, workspaceId: workspace.id, can }}
       />
     </>
   );
@@ -822,15 +824,16 @@ function RouteActions({
   reload: () => void;
 }) {
   const viewer = useUser();
-  const { manager } = useWorkspace();
+  const { can } = useWorkspace();
   const { confirm } = useFeedback();
   const [granting, setGranting] = useState(false);
   const agent = useEntity("agents", route.agentId, route.workspaceId);
-  if (!(
-    manager ||
-    (route.kind === "serve" && isSelf(agent?.principal, viewer.id))
-  ))
-    return null;
+  const manage =
+    route.kind === "egress"
+      ? can("egress_routes.manage")
+      : can("services.manage") ||
+        (can("services.manage_own") && isSelf(agent?.principal, viewer.id));
+  if (!manage) return null;
   return (
     <>
       <RowMenu>
@@ -864,7 +867,6 @@ function RouteActions({
       {granting && (
         <GrantDialog
           workspaceId={route.workspaceId}
-          manager={manager}
           resource={{
             type: route.kind === "serve" ? "service" : "egress",
             id: route.kind === "serve" ? route.targetId : route.id,
@@ -879,7 +881,7 @@ function RouteActions({
 }
 
 export function RoutesPage() {
-  const { workspace, manager } = useWorkspace();
+  const { workspace, can } = useWorkspace();
   const table = useTableState();
   const [kind, setKind] = useState("all");
   const [creating, setCreating] = useState(false);
@@ -957,7 +959,7 @@ export function RoutesPage() {
         title="路由管理"
         description="服务发布路由由设备配置生成；出口路由把 TLS 域名交给指定的 Egress 设备。"
         actions={
-          manager && (
+          can("egress_routes.manage") && (
             <Button onClick={() => setCreating(true)}>
               <PlusIcon />
               创建出口路由
@@ -1015,6 +1017,7 @@ function grantState(g: Grant) {
 
 function GrantSubject({ grant }: { grant: Grant }) {
   if (grant.subjectType === "anonymous") return <span>匿名访问者</span>;
+  if (grant.subjectType === "authenticated") return <span>所有已登录用户</span>;
   if (grant.subjectType === "workspace")
     return (
       <span>
@@ -1034,8 +1037,7 @@ function GrantSubject({ grant }: { grant: Grant }) {
 }
 
 export function AccessPage() {
-  const viewer = useUser();
-  const { workspace, manager } = useWorkspace();
+  const { workspace, can } = useWorkspace();
   const { confirm } = useFeedback();
   const [resourceID, setResourceID] = useQueryParam("resourceId");
   const table = useTableState();
@@ -1087,9 +1089,9 @@ export function AccessPage() {
     {
       header: "",
       className: "w-10",
+      // The list holds only grants the viewer may manage.
       cell: (g) =>
-        !g.revoked &&
-        (manager || g.createdBy === viewer.id) && (
+        !g.revoked && (
           <RowMenu>
             <DropdownMenuItem
               variant="destructive"
@@ -1123,10 +1125,12 @@ export function AccessPage() {
         title="权限管理"
         description="访问授权决定谁可以使用哪项服务或出口路由。"
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <PlusIcon />
-            添加授权
-          </Button>
+          (can("services.manage_own") || can("egress_routes.manage")) && (
+            <Button onClick={() => setCreating(true)}>
+              <PlusIcon />
+              添加授权
+            </Button>
+          )
         }
       />
       <TableToolbar
@@ -1181,7 +1185,6 @@ export function AccessPage() {
       {creating && (
         <GrantDialog
           workspaceId={workspace.id}
-          manager={manager}
           onClose={() => setCreating(false)}
           onDone={data.reload}
         />

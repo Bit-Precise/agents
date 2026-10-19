@@ -9,13 +9,12 @@ import {
 import * as sdk from "@/api/generated/sdk.gen";
 import type {
   Info,
-  Membership,
   Session,
   User,
   Workspace,
+  WorkspacePermissions,
 } from "@/api/generated";
 import {
-  APIFailure,
   requestSignal,
   result,
   serviceReturnTo,
@@ -91,12 +90,18 @@ export function useUser(): User {
   return user;
 }
 
-// The Workspace a page belongs to and the signed-in person's role in it.
+// Permission is a control-plane permission (docs/authorization.md).
+export type Permission = WorkspacePermissions["permissions"][number];
+
+// The Workspace a page belongs to and what the signed-in person may manage in
+// it. can reflects GET /permissions so pages only offer what Control allows;
+// Control still checks every operation.
 export type WorkspaceScope = {
   workspace: Workspace;
-  membership: Membership | null;
-  manager: boolean;
+  role?: Role;
+  can: (permission: Permission) => boolean;
 };
+type Role = NonNullable<WorkspacePermissions["role"]>;
 const WorkspaceContext = createContext<WorkspaceScope | null>(null);
 export const WorkspaceProvider = WorkspaceContext.Provider;
 export function useWorkspace() {
@@ -105,28 +110,22 @@ export function useWorkspace() {
   return value;
 }
 
+// membershipPermission mirrors authz.MembershipChange: any change that
+// involves owner or maintainer needs members.manage_privileged.
+export function membershipPermission(...roles: (string | undefined)[]) {
+  return roles.some((r) => r === "owner" || r === "maintainer")
+    ? "members.manage_privileged"
+    : "members.manage";
+}
+
 export async function loadWorkspace(
-  user: User,
   workspaceId: string,
   signal: AbortSignal,
 ): Promise<WorkspaceScope> {
-  const workspace = result(
-    await sdk.getWorkspace({ path: { workspaceId }, signal }),
-  );
-  let membership: Membership | null = null;
-  try {
-    membership = result(
-      await sdk.getMembership({
-        path: { workspaceId, userId: user.id },
-        signal,
-      }),
-    );
-  } catch (e) {
-    if (!(e instanceof APIFailure && e.status === 404)) throw e;
-  }
-  const manager =
-    user.admin ||
-    membership?.role === "owner" ||
-    membership?.role === "maintainer";
-  return { workspace, membership, manager };
+  const [workspace, access] = await Promise.all([
+    sdk.getWorkspace({ path: { workspaceId }, signal }).then(result),
+    sdk.getWorkspacePermissions({ path: { workspaceId }, signal }).then(result),
+  ]);
+  const held = new Set<string>(access.permissions);
+  return { workspace, role: access.role, can: (p) => held.has(p) };
 }

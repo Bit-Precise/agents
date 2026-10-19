@@ -12,7 +12,7 @@ import { FormDialog } from "./form-dialog";
 import { memberRoles, roleNames } from "@/lib/format";
 import { navigate } from "@/lib/router";
 import { paths } from "@/lib/routes";
-import { useUser } from "@/lib/session";
+import { useUser, useWorkspace } from "@/lib/session";
 
 export function CreateWorkspaceDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
@@ -113,6 +113,8 @@ export function MemberDialog({
   onDone: () => void;
 }) {
   const viewer = useUser();
+  // Owner and maintainer are offered only with members.manage_privileged.
+  const privileged = useWorkspace().can("members.manage_privileged");
   const [userID, setUserID] = useState(member?.userId ?? "");
   const [userLabel, setUserLabel] = useState("");
   const [role, setRole] = useState<Membership["role"]>(
@@ -196,6 +198,8 @@ export function MemberDialog({
           options={memberRoles.map((value) => ({
             value,
             label: roleNames[value],
+            disabled:
+              !privileged && (value === "owner" || value === "maintainer"),
           }))}
           className="w-full"
         />

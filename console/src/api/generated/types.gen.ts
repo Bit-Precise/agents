@@ -97,9 +97,9 @@ export type Grant = {
     resourceId: string;
     resourceType: 'service' | 'egress';
     /**
-     * workspace matches human members only; service_account grants are for egress.
+     * anonymous and authenticated (every signed-in user) open services and take no subjectId; workspace matches human members only; service_account grants are for egress. See docs/authorization.md.
      */
-    subjectType: 'user' | 'workspace' | 'anonymous' | 'service_account';
+    subjectType: 'user' | 'workspace' | 'anonymous' | 'authenticated' | 'service_account';
     subjectId?: string;
     startsAt: string;
     expiresAt: string;
@@ -230,9 +230,9 @@ export type CreateGrant = {
     resourceType: 'service' | 'egress';
     resourceId: string;
     /**
-     * workspace matches human members only; service_account grants are for egress.
+     * anonymous and authenticated (every signed-in user) open services and take no subjectId; workspace matches human members only; service_account grants are for egress. See docs/authorization.md.
      */
-    subjectType: 'user' | 'workspace' | 'anonymous' | 'service_account';
+    subjectType: 'user' | 'workspace' | 'anonymous' | 'authenticated' | 'service_account';
     subjectId?: string;
     startsAt?: string;
     expiresAt: string;
@@ -396,9 +396,9 @@ export type CreateWorkspaceGrant = {
     resourceType: 'service' | 'egress';
     resourceId: string;
     /**
-     * workspace matches human members only; service_account grants are for egress.
+     * anonymous and authenticated (every signed-in user) open services and take no subjectId; workspace matches human members only; service_account grants are for egress. See docs/authorization.md.
      */
-    subjectType: 'user' | 'workspace' | 'anonymous' | 'service_account';
+    subjectType: 'user' | 'workspace' | 'anonymous' | 'authenticated' | 'service_account';
     subjectId?: string;
     startsAt?: string;
     expiresAt: string;
@@ -640,6 +640,21 @@ export type AgentEnrollment = {
     workspace: string;
     name: string;
     desired: AgentSpec;
+};
+
+/**
+ * What the caller may do in the Workspace on the control plane. The Console shows actions by it; Control still checks every operation. See docs/authorization.md.
+ */
+export type WorkspacePermissions = {
+    /**
+     * The caller's Membership role; absent when an instance administrator is not a member.
+     */
+    role?: 'owner' | 'maintainer' | 'developer' | 'guest';
+    /**
+     * The caller is an instance administrator and holds every permission.
+     */
+    admin: boolean;
+    permissions: Array<'workspace.view' | 'members.manage' | 'members.manage_privileged' | 'service_accounts.manage' | 'agents.manage' | 'agents.provide' | 'services.manage' | 'services.manage_own' | 'egress_routes.manage' | 'grants.share_external'>;
 };
 
 export type EnrollData = {
@@ -1839,7 +1854,7 @@ export type ListAdminGrantsData = {
         workspaceId?: string;
         resourceType?: string;
         resourceId?: string;
-        subjectType?: string;
+        subjectType?: 'user' | 'workspace' | 'anonymous' | 'authenticated' | 'service_account';
         subjectId?: string;
         revoked?: boolean;
     };
@@ -2695,7 +2710,7 @@ export type ListWorkspaceGrantsData = {
         sortOrder?: 'asc' | 'desc';
         resourceType?: string;
         resourceId?: string;
-        subjectType?: string;
+        subjectType?: 'user' | 'workspace' | 'anonymous' | 'authenticated' | 'service_account';
         subjectId?: string;
         revoked?: boolean;
     };
@@ -3256,6 +3271,33 @@ export type GetWorkspaceResponses = {
 };
 
 export type GetWorkspaceResponse = GetWorkspaceResponses[keyof GetWorkspaceResponses];
+
+export type GetWorkspacePermissionsData = {
+    body?: never;
+    path: {
+        workspaceId: string;
+    };
+    query?: never;
+    url: '/v1/workspaces/{workspaceId}/permissions';
+};
+
+export type GetWorkspacePermissionsErrors = {
+    /**
+     * API error
+     */
+    default: Error;
+};
+
+export type GetWorkspacePermissionsError = GetWorkspacePermissionsErrors[keyof GetWorkspacePermissionsErrors];
+
+export type GetWorkspacePermissionsResponses = {
+    /**
+     * Success
+     */
+    200: WorkspacePermissions;
+};
+
+export type GetWorkspacePermissionsResponse = GetWorkspacePermissionsResponses[keyof GetWorkspacePermissionsResponses];
 
 export type ListAdminServersData = {
     body?: never;

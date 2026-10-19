@@ -66,8 +66,11 @@ func Open(ctx context.Context, options Options) (*Store, error) {
 	if err = store.migrate(ctx); err != nil {
 		return fail(err)
 	}
-	if err = store.migratePrincipals(ctx); err != nil {
+	if err = store.migrateConstraints(ctx, 3, sqlitePrincipalSchema, postgresPrincipalSchema, migratePrincipalPayloads); err != nil {
 		return fail(fmt.Errorf("control migration 4: %w", err))
+	}
+	if err = store.migrateConstraints(ctx, 4, sqliteGrantSubjectSchema, postgresGrantSubjectSchema, nil); err != nil {
+		return fail(fmt.Errorf("control migration 5: %w", err))
 	}
 	return store, nil
 }
@@ -88,7 +91,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err = tx.QueryRowContext(ctx, "SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil {
 		return err
 	}
-	if version < 1 || version > 4 {
+	if version < 1 || version > 5 {
 		return fmt.Errorf("unsupported control schema version %d", version)
 	}
 	if version == 1 {
@@ -301,7 +304,7 @@ var sqlitePrincipalSchema = []string{
 	`DROP TABLE enrollment_keys`,
 	`ALTER TABLE enrollment_keys_v4 RENAME TO enrollment_keys`,
 	`ALTER TABLE tokens ADD COLUMN service_account_id TEXT REFERENCES service_accounts(id)`,
-	`CREATE TABLE grants_v4 (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id),resource_type TEXT NOT NULL CHECK(resource_type IN ('service','egress')),service_id TEXT,route_id TEXT,subject_type TEXT NOT NULL CHECK(subject_type IN ('user','workspace','anonymous','service_account')),subject_user_id TEXT REFERENCES users(id),subject_workspace_id TEXT REFERENCES workspaces(id),subject_service_account_id TEXT REFERENCES service_accounts(id),payload TEXT NOT NULL,FOREIGN KEY(workspace_id,service_id) REFERENCES services(workspace_id,id),FOREIGN KEY(workspace_id,route_id) REFERENCES egress_routes(workspace_id,id),` + resourceCheck + `,` + subjectCheck + `)`,
+	`CREATE TABLE grants_v4 (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id),resource_type TEXT NOT NULL CHECK(resource_type IN ('service','egress')),service_id TEXT,route_id TEXT,subject_type TEXT NOT NULL CHECK(subject_type IN ('user','workspace','anonymous','service_account')),subject_user_id TEXT REFERENCES users(id),subject_workspace_id TEXT REFERENCES workspaces(id),subject_service_account_id TEXT REFERENCES service_accounts(id),payload TEXT NOT NULL,FOREIGN KEY(workspace_id,service_id) REFERENCES services(workspace_id,id),FOREIGN KEY(workspace_id,route_id) REFERENCES egress_routes(workspace_id,id),` + resourceCheck + `,` + subjectCheckV4 + `)`,
 	`INSERT INTO grants_v4(id,workspace_id,resource_type,service_id,route_id,subject_type,subject_user_id,subject_workspace_id,subject_service_account_id,payload) SELECT id,workspace_id,resource_type,service_id,route_id,subject_type,subject_user_id,subject_workspace_id,NULL,payload FROM grants`,
 	`DROP TABLE grants`,
 	`ALTER TABLE grants_v4 RENAME TO grants`,
@@ -309,7 +312,7 @@ var sqlitePrincipalSchema = []string{
 }
 
 const resourceCheck = `CHECK((resource_type='service' AND service_id IS NOT NULL AND route_id IS NULL) OR (resource_type='egress' AND route_id IS NOT NULL AND service_id IS NULL))`
-const subjectCheck = `CHECK((subject_type='user' AND subject_user_id IS NOT NULL AND subject_workspace_id IS NULL AND subject_service_account_id IS NULL) OR (subject_type='workspace' AND subject_workspace_id IS NOT NULL AND subject_user_id IS NULL AND subject_service_account_id IS NULL) OR (subject_type='service_account' AND subject_service_account_id IS NOT NULL AND subject_user_id IS NULL AND subject_workspace_id IS NULL) OR (subject_type='anonymous' AND subject_user_id IS NULL AND subject_workspace_id IS NULL AND subject_service_account_id IS NULL AND resource_type='service'))`
+const subjectCheckV4 = `CHECK((subject_type='user' AND subject_user_id IS NOT NULL AND subject_workspace_id IS NULL AND subject_service_account_id IS NULL) OR (subject_type='workspace' AND subject_workspace_id IS NOT NULL AND subject_user_id IS NULL AND subject_service_account_id IS NULL) OR (subject_type='service_account' AND subject_service_account_id IS NOT NULL AND subject_user_id IS NULL AND subject_workspace_id IS NULL) OR (subject_type='anonymous' AND subject_user_id IS NULL AND subject_workspace_id IS NULL AND subject_service_account_id IS NULL AND resource_type='service'))`
 
 var postgresPrincipalSchema = []string{
 	`CREATE TABLE service_accounts (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id),name TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(workspace_id,id),UNIQUE(workspace_id,name))`,
@@ -324,23 +327,42 @@ var postgresPrincipalSchema = []string{
 	`ALTER TABLE tokens ADD COLUMN service_account_id TEXT REFERENCES service_accounts(id)`,
 	`ALTER TABLE grants ADD COLUMN subject_service_account_id TEXT REFERENCES service_accounts(id)`,
 	`ALTER TABLE grants ADD CONSTRAINT grants_subject_type_v4_check CHECK(subject_type IN ('user','workspace','anonymous','service_account'))`,
-	`ALTER TABLE grants ADD CONSTRAINT grants_subject_v4_check ` + subjectCheck,
+	`ALTER TABLE grants ADD CONSTRAINT grants_subject_v4_check ` + subjectCheckV4,
 	`CREATE TABLE enrollment_authorizations (id TEXT PRIMARY KEY,payload TEXT NOT NULL)`,
 }
 
-// migratePrincipals is schema version 4. Existing Agents become User
-// principals with their original IDs; legacy User enrollment keys stay valid.
-func (s *Store) migratePrincipals(ctx context.Context) error {
+// Schema version 5 adds the authenticated grant subject: like anonymous it
+// names no subject and opens services only.
+const subjectTypesV5 = `CHECK(subject_type IN ('user','workspace','anonymous','authenticated','service_account'))`
+const subjectCheckV5 = `CHECK((subject_type='user' AND subject_user_id IS NOT NULL AND subject_workspace_id IS NULL AND subject_service_account_id IS NULL) OR (subject_type='workspace' AND subject_workspace_id IS NOT NULL AND subject_user_id IS NULL AND subject_service_account_id IS NULL) OR (subject_type='service_account' AND subject_service_account_id IS NOT NULL AND subject_user_id IS NULL AND subject_workspace_id IS NULL) OR (subject_type IN ('anonymous','authenticated') AND subject_user_id IS NULL AND subject_workspace_id IS NULL AND subject_service_account_id IS NULL AND resource_type='service'))`
+
+var sqliteGrantSubjectSchema = []string{
+	`CREATE TABLE grants_v5 (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL REFERENCES workspaces(id),resource_type TEXT NOT NULL CHECK(resource_type IN ('service','egress')),service_id TEXT,route_id TEXT,subject_type TEXT NOT NULL ` + subjectTypesV5 + `,subject_user_id TEXT REFERENCES users(id),subject_workspace_id TEXT REFERENCES workspaces(id),subject_service_account_id TEXT REFERENCES service_accounts(id),payload TEXT NOT NULL,FOREIGN KEY(workspace_id,service_id) REFERENCES services(workspace_id,id),FOREIGN KEY(workspace_id,route_id) REFERENCES egress_routes(workspace_id,id),` + resourceCheck + `,` + subjectCheckV5 + `)`,
+	`INSERT INTO grants_v5(id,workspace_id,resource_type,service_id,route_id,subject_type,subject_user_id,subject_workspace_id,subject_service_account_id,payload) SELECT id,workspace_id,resource_type,service_id,route_id,subject_type,subject_user_id,subject_workspace_id,subject_service_account_id,payload FROM grants`,
+	`DROP TABLE grants`,
+	`ALTER TABLE grants_v5 RENAME TO grants`,
+}
+var postgresGrantSubjectSchema = []string{
+	`ALTER TABLE grants ADD CONSTRAINT grants_subject_type_v5_check ` + subjectTypesV5,
+	`ALTER TABLE grants ADD CONSTRAINT grants_subject_v5_check ` + subjectCheckV5,
+}
+
+// migrateConstraints upgrades schema version from to from+1 when the database
+// is at it. SQLite cannot alter constraints, so its statements rebuild tables
+// with foreign key enforcement suspended for the migration only; PostgreSQL
+// first drops the grant subject constraints by definition, because version 1
+// let it generate their names. rewrite, if set, runs in the same transaction.
+func (s *Store) migrateConstraints(ctx context.Context, from int, sqlite, postgres []string, rewrite func(context.Context, *sql.Tx) error) error {
 	var version int
 	if err := s.sql.QueryRowContext(ctx, "SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil {
 		return err
 	}
-	if version != 3 {
+	if version != from {
 		return nil
 	}
-	statements := postgresPrincipalSchema
+	statements := postgres
 	if s.driver == "sqlite" {
-		statements = sqlitePrincipalSchema
+		statements = sqlite
 		// PRAGMA foreign_keys is a no-op inside a transaction. The single
 		// connection keeps it off only for this migration.
 		if _, err := s.sql.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
@@ -354,8 +376,6 @@ func (s *Store) migratePrincipals(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 	if s.driver != "sqlite" {
-		// Drop the version-1 subject constraints by definition; PostgreSQL
-		// generated their names.
 		var names []string
 		if err := eachRow(ctx, tx, `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'grants'::regclass AND contype = 'c'`, func(name, definition string) error {
 			if strings.Contains(definition, "subject_type") {
@@ -376,13 +396,10 @@ func (s *Store) migratePrincipals(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := rewritePayloads(ctx, tx, "agents", func(a *map[string]any) {
-		if userID, ok := (*a)["userId"].(string); ok {
-			(*a)["principal"] = map[string]string{"type": "user", "id": userID}
-			delete(*a, "userId")
+	if rewrite != nil {
+		if err := rewrite(ctx, tx); err != nil {
+			return err
 		}
-	}); err != nil {
-		return err
 	}
 	if s.driver == "sqlite" {
 		rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")
@@ -395,10 +412,22 @@ func (s *Store) migratePrincipals(ctx context.Context) error {
 			return errors.New("foreign key violation after rebuilding tables")
 		}
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE control_meta SET schema_version=4 WHERE id=1"); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE control_meta SET schema_version=$1 WHERE id=1", from+1); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// migratePrincipalPayloads is part of schema version 4: existing Agents become
+// User principals with their original IDs; legacy User enrollment keys stay
+// valid.
+func migratePrincipalPayloads(ctx context.Context, tx *sql.Tx) error {
+	return rewritePayloads(ctx, tx, "agents", func(a *map[string]any) {
+		if userID, ok := (*a)["userId"].(string); ok {
+			(*a)["principal"] = map[string]string{"type": "user", "id": userID}
+			delete(*a, "userId")
+		}
+	})
 }
 
 func eachRow(ctx context.Context, tx *sql.Tx, query string, fn func(a, b string) error) error {

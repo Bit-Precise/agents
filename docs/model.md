@@ -3,6 +3,7 @@
 本文是 agents / agentd 当前实现中实体、状态与关系的唯一权威说明，以代码为准：`control/types`、`control/state`、`edge`，以及 agentd 的 `api`、`connection`、`orchestration`、`supervisor`。其他文档描述当前行为时应链接本文，不再各自重复字段、状态或时限。
 
 - **身份与注册设计**：Service Account、typed principal 与 Hydra Device Flow 的设计理由、威胁边界和验收标准见 [身份与 Device Flow 设计](identity-and-device-flow.md)；当前实现以本文为准。
+- **授权**：控制面 RBAC（角色 × 权限矩阵）与数据面 Grant（主体 × 资源）见 [授权模型](authorization.md)，代码在 `control/authz`。
 - **远期架构**：Tunnel 分层、gateway 独立进程、分享邀请、证书 worker、多 Edge，见 agentd 仓库的 `docs/agents-agentd-architecture.md`。
 
 设备接入和配置变更都没有人工审批，Control 自动校验后直接接受或拒绝。旧模型里的 `Approval`、`pendingApproval`、`/approval` 和 `autoApprove` 已经删除，存量数据由 DB v3 迁移转换（见第 6 节）。
@@ -13,7 +14,7 @@
 |---|---|---|---|
 | User | `types.User` | 实例级；表 `users` | 身份唯一键是 OIDC `(issuer, subject)`，存于 `OIDCIdentity`。`Email`（仅已验证）与 `Picture`（仅 HTTPS）是每次 SSO 登录刷新的展示数据，不参与身份识别。`Admin` 即 instance admin；对邮件名单管理的用户，`Admin` 由 `AdminFromEmail` 派生。停用是单向操作 |
 | Workspace | `types.Workspace` | 表 `workspaces` | 名称是不可变的 DNS label。新用户自动获得 `personal-<userID>`；任何用户都可以再创建 Workspace 并成为 owner（实例管理员以外最多拥有 20 个，`personal-` 前缀保留） |
-| Membership | `types.Membership` | `(workspace, user)` 复合主键 | 角色为 `owner / maintainer / developer / guest`。删除即退出 Workspace，并级联撤销设备 |
+| Membership | `types.Membership` | `(workspace, user)` 复合主键 | 角色为 `owner / maintainer / developer / guest`，各角色的控制面权限见 [授权模型](authorization.md)。删除即退出 Workspace，并级联撤销设备 |
 | Service Account | `types.ServiceAccount` | 固定属于一个 Workspace；表 `service_accounts`，Workspace 内名称唯一 | 机器主体，不登录 Console，没有 user Token。名称和归属创建后不变，只能修改说明。由 maintainer/owner 或 instance admin 管理；撤销是终态 |
 | Agent | `types.Agent`（持久记录）、`api.Agent`（API 视图） | Workspace 内名称唯一；主体 `Principal` 恰为一个 User 或一个同 Workspace 的 Service Account | `Principal`（`{type: user\|service_account, id}`）、`CreatedBy`（注册操作人，只用于展示和审计，从不参与权限判断）、`Status`、`Roles`（角色上限）、`Desired`（AgentSpec）、`Effective`（EffectiveConfig）、`LastRejection`、`RevokedAt`。设计文档称之为 AgentRegistration |
 | AgentSpec | `api.AgentSpec` | 存于 Agent 的 `Desired` | 由 config.yaml 派生的服务端相关子集：各角色是否启用、serve 服务名与 origin、egress allow/deny。本地路径、监听地址、承载参数和 ingress routes 不上传 |
@@ -23,7 +24,7 @@
 | Token | `types.Token` | 只保存哈希 | 种类：`user / enrollment / control / provider / access`，用途互不替代。设备 Token 绑定 Agent 的主体：`UserID` 或 `ServiceAccountID` 恰有其一。SA 没有 user Token，不能登录 Console 或调用管理 API |
 | Service | `types.Service` | `(workspace, name)` 唯一，hostname 全局唯一 | 固定属于一个 Agent。Desired 声明服务名时即预留名称，主机名为 `<service>.<workspace>.<base>`。`Enabled` 是管理员的发布开关。API 视图名为 server，route 视图里是 `kind=serve` |
 | EgressRoute | `types.EgressRoute` | Workspace 内名称唯一 | 一条域名/端口/TLS 规则加优先级，固定指向一个出口 Agent。只决定选路，不授予访问权 |
-| Grant | `types.Grant` | 资源和主体用 XOR 约束 | 资源为 Service 或 EgressRoute，主体为 `user / workspace / service_account / anonymous`。`workspace` 只匹配人类成员，不包括其中的 SA；`service_account` 只能用于 EgressRoute 且须同 Workspace（浏览器 Serve 没有机器消费路径）；`anonymous` 只能用于 Service。有限时间窗，`Revoked` 不可恢复。`External` 表示经 manager 授权的跨 Workspace 分享，`CreatedBy` 记录创建者 |
+| Grant | `types.Grant` | 资源和主体用 XOR 约束 | 数据面授权。资源为 Service 或 EgressRoute，主体为 `anonymous / authenticated / user / workspace / service_account`：`anonymous`（任何人）与 `authenticated`（本实例任何已登录用户）只能用于 Service 且不带主体 ID；`workspace` 只匹配人类成员，不包括其中的 SA；`service_account` 只能用于 EgressRoute 且须同 Workspace（浏览器 Serve 没有机器消费路径）。完整规则见 [授权模型](authorization.md)。有限时间窗，`Revoked` 不可恢复。`External` 表示经 `grants.share_external` 授权的对外分享，`CreatedBy` 记录创建者 |
 | names | 表 `names` | 每次保存时从 Agents 和 Services 推导 | Agent 名和服务名共用同一个 Workspace DNS 命名空间 |
 | Audit | `types.Audit` | 只追加 | `Detail` 记录原因，例如自动拒绝的理由、迁移前的旧审批快照 |
 
@@ -166,6 +167,7 @@ provider 和 access 会话只在"本地启用了该角色、持有对应凭据�
 
 ## 6. 兼容性与迁移
 
+- DB v5 迁移为 grants 的主体约束加入 `authenticated`（与 `anonymous` 一样不带主体 ID、只能用于服务）。SQLite 重建 grants 表，PostgreSQL 替换 CHECK 约束；不改动任何已有数据。
 - DB v4 迁移新增 `service_accounts` 和 `enrollment_authorizations`，agents / enrollment_keys / tokens 增加 `service_account_id` 列并以 CHECK 约束"恰有一个主体"、以复合外键约束 SA 与 Agent/Key 同 Workspace；grants 增加 `service_account` 主体。存量 Agent 的 `userId` 改写为 `principal: {type: user}`，存量 User 密钥保留为 legacy。SQLite 通过重建表完成，PostgreSQL 通过 ALTER 完成，结束前做外键检查。
 - 线协议的认证结果携带 `principal_type / principal_id`，凭据文件携带 `principal`；agentd 与 agents 需要一起升级。
 

@@ -315,6 +315,64 @@ func TestInternalUserGrantEndsWhenSubjectLeavesWorkspace(t *testing.T) {
 	requireKind(t, err, types.KindForbidden)
 }
 
+func TestAuthenticatedGrantCoversEverySignedInUser(t *testing.T) {
+	f := setup(t)
+	enrolled := f.enroll(t)
+	outsider, _, err := f.s.CreateUser(f.admin.ID, "outsider", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := f.s.SnapshotForUser(f.admin.ID)
+	svc := snap.Services[0]
+	everyone := types.Grant{WorkspaceID: f.workspace.ID, ResourceType: "service", ResourceID: svc.ID, SubjectType: "authenticated", ExpiresAt: time.Now().Add(time.Hour)}
+	// The developer manages the service, but sharing beyond the Workspace needs
+	// grants.share_external.
+	_, err = f.s.CreateGrant(f.user.ID, everyone)
+	requireKind(t, err, types.KindForbidden)
+	_, err = f.s.ResolveServe(svc.Hostname, outsider.ID)
+	requireKind(t, err, types.KindForbidden)
+	grant, err := f.s.CreateGrant(f.admin.ID, everyone)
+	if err != nil || !grant.External || grant.SubjectID != "" {
+		t.Fatalf("authenticated grant: %+v %v", grant, err)
+	}
+	if _, err = f.s.ResolveServe(svc.Hostname, outsider.ID); err != nil {
+		t.Fatalf("a signed-in non-member was refused: %v", err)
+	}
+	_, err = f.s.ResolveServe(svc.Hostname, "")
+	requireKind(t, err, types.KindForbidden)
+	named := everyone
+	named.SubjectID = outsider.ID
+	_, err = f.s.CreateGrant(f.admin.ID, named)
+	requireKind(t, err, types.KindInvalid)
+	route, err := f.s.CreateEgressRoute(f.admin.ID, types.EgressRoute{WorkspaceID: f.workspace.ID, AgentID: enrolled.Agent.ID, Name: "office", Rule: rule("oa.test"), Priority: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.s.CreateGrant(f.admin.ID, types.Grant{WorkspaceID: f.workspace.ID, ResourceType: "egress", ResourceID: route.ID, SubjectType: "authenticated", ExpiresAt: time.Now().Add(time.Hour)})
+	requireKind(t, err, types.KindInvalid)
+	if err = f.s.DisableUser(f.admin.ID, outsider.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.s.ResolveServe(svc.Hostname, outsider.ID)
+	requireKind(t, err, types.KindUnauthorized)
+	// The stored grant survives a restart.
+	bob, _, err := f.s.CreateUser(f.admin.ID, "bob", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(t.Context(), db.Options{DSN: f.path}, "instance.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	if _, err = again.ResolveServe(svc.Hostname, bob.ID); err != nil {
+		t.Fatalf("authenticated grant lost after restart: %v", err)
+	}
+}
+
 func TestEgressRequiresRouteGrantAndBothCapabilitySides(t *testing.T) {
 	f := setup(t)
 	enrolled := f.enroll(t)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/policy"
+	"github.com/bit-precise/agents/control/authz"
 	"github.com/bit-precise/agents/control/types"
 	"github.com/bit-precise/agents/edge"
 	"github.com/bit-precise/agents/internal/controlrpc"
@@ -141,6 +142,32 @@ func TestRESTAuthorizationScopesAndRemovedPaths(t *testing.T) {
 			t.Fatalf("API %s fell back to SPA", path)
 		}
 	}
+}
+
+func TestRESTWorkspacePermissionsFollowTheRBACMatrix(t *testing.T) {
+	f := newRESTFixture(t)
+	path := "/v1/workspaces/" + f.workspace.ID + "/permissions"
+	var developer WorkspacePermissions
+	restRequire(t, f.request(t, "GET", path, f.aliceToken, nil), 200, &developer)
+	if developer.Role != "developer" || developer.Admin || !slices.Equal(developer.Permissions, []authz.Permission{authz.ViewWorkspace, authz.ProvideFromOwnDevices, authz.ManageOwnServices}) {
+		t.Fatalf("developer permissions: %+v", developer)
+	}
+	// An instance administrator holds every permission even without a Membership.
+	team, err := f.app.State.CreateWorkspace(f.alice.ID, "alice-team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var admin, owner WorkspacePermissions
+	restRequire(t, f.request(t, "GET", "/v1/workspaces/"+team.ID+"/permissions", restBootstrap, nil), 200, &admin)
+	if admin.Role != "" || !admin.Admin || !slices.Equal(admin.Permissions, authz.AllPermissions) {
+		t.Fatalf("administrator permissions: %+v", admin)
+	}
+	restRequire(t, f.request(t, "GET", "/v1/workspaces/"+team.ID+"/permissions", f.aliceToken, nil), 200, &owner)
+	if owner.Role != "owner" || owner.Admin || !slices.Equal(owner.Permissions, authz.AllPermissions) {
+		t.Fatalf("owner permissions: %+v", owner)
+	}
+	restRequire(t, f.request(t, "GET", "/v1/workspaces/"+f.foreign.ID+"/permissions", f.aliceToken, nil), 404, nil)
+	restRequire(t, f.request(t, "GET", path, "", nil), 401, nil)
 }
 
 func TestRESTPaginationFiltersAndStrictQuery(t *testing.T) {

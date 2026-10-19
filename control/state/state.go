@@ -18,6 +18,7 @@ import (
 
 	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/policy"
+	"github.com/bit-precise/agents/control/authz"
 	"github.com/bit-precise/agents/control/db"
 	"github.com/bit-precise/agents/control/types"
 )
@@ -35,10 +36,8 @@ const (
 	// principal, so old links cannot be captured immediately.
 	NameTombstoneTTL = 7 * 24 * time.Hour
 	// PolicyVersion identifies the built-in Workspace policy: the enrollment
-	// role ceiling narrowed by the Workspace role (guests run ingress only).
+	// role ceiling narrowed by authz.DeviceRoles.
 	PolicyVersion = "builtin/1"
-	// defaultGrantCreator marks grants created by the Workspace default policy.
-	defaultGrantCreator = "policy:default-member-access"
 )
 
 type State struct {
@@ -290,30 +289,6 @@ func requireTargetUser(snap *types.Snapshot, id string) (*types.User, error) {
 	}
 	return u, nil
 }
-func requireAdmin(snap *types.Snapshot, id string) error {
-	u, err := requireUser(snap, id)
-	if err != nil {
-		return err
-	}
-	if !u.Admin {
-		return problem(types.KindForbidden, "instance administrator required")
-	}
-	return nil
-}
-func requireManager(snap *types.Snapshot, actorID, workspaceID string) error {
-	u, err := requireUser(snap, actorID)
-	if err != nil {
-		return err
-	}
-	if u.Admin {
-		return nil
-	}
-	m := member(snap, workspaceID, actorID)
-	if m == nil || (m.Role != "owner" && m.Role != "maintainer") {
-		return problem(types.KindForbidden, "workspace manager required")
-	}
-	return nil
-}
 func activeAdmins(snap *types.Snapshot) int {
 	count := 0
 	for _, u := range snap.Users {
@@ -387,9 +362,11 @@ func identity(snap *types.Snapshot, plain string) (types.Identity, error) {
 		if a == nil || !agentAllowed(snap, a) {
 			return types.Identity{}, problem(types.KindUnauthorized, "agent is inactive")
 		}
-		ceiling := roleCeiling(snap, a)
-		if t.Kind == "provider" && !slices.Contains(ceiling, api.RoleServe) && !slices.Contains(ceiling, api.RoleEgress) {
-			return types.Identity{}, problem(types.KindForbidden, "provider roles are not permitted for this agent")
+		// Device credentials follow the effective configuration Control computed,
+		// never a Workspace role directly; agentd opens each session on the same
+		// condition.
+		if t.Kind == "provider" && len(a.Effective.Services) == 0 && len(a.Effective.Egress) == 0 {
+			return types.Identity{}, problem(types.KindForbidden, "no service or egress in the effective configuration")
 		}
 		if t.Kind == "access" && !a.Effective.Ingress {
 			return types.Identity{}, problem(types.KindForbidden, "ingress is not in the effective configuration")
@@ -465,7 +442,7 @@ func (s *State) CreateUser(actorID, name string, admin bool) (types.User, string
 	var out types.User
 	plain := randomToken()
 	err := s.mutate(func(snap *types.Snapshot) error {
-		if err := requireAdmin(snap, actorID); err != nil {
+		if err := authz.RequireAdmin(snap, actorID); err != nil {
 			return err
 		}
 		if strings.TrimSpace(name) != name || name == "" || len(name) > 128 {
@@ -504,7 +481,7 @@ func createPersonalWorkspace(snap *types.Snapshot, owner types.User, actorID str
 	}
 	w := types.Workspace{ID: randomID(), Name: name, CreatedAt: owner.CreatedAt}
 	snap.Workspaces = append(snap.Workspaces, w)
-	snap.Memberships = append(snap.Memberships, types.Membership{WorkspaceID: w.ID, UserID: owner.ID, Role: "owner"})
+	snap.Memberships = append(snap.Memberships, types.Membership{WorkspaceID: w.ID, UserID: owner.ID, Role: string(authz.Owner)})
 	audit(snap, actorID, "workspace.personal.create", w.ID)
 	return nil
 }
@@ -525,7 +502,7 @@ func solePersonalWorkspace(snap *types.Snapshot, workspaceID, userID string) boo
 		if m.WorkspaceID != w.ID {
 			continue
 		}
-		if m.UserID != userID || m.Role != "owner" {
+		if m.UserID != userID || m.Role != string(authz.Owner) {
 			return false
 		}
 		count++
@@ -558,7 +535,7 @@ func (s *State) CreateWorkspace(actorID, name string) (types.Workspace, error) {
 			}
 			owned := 0
 			for _, m := range snap.Memberships {
-				if m.UserID == actorID && m.Role == "owner" {
+				if m.UserID == actorID && m.Role == string(authz.Owner) {
 					owned++
 				}
 			}
@@ -571,19 +548,16 @@ func (s *State) CreateWorkspace(actorID, name string) (types.Workspace, error) {
 		}
 		out = types.Workspace{ID: randomID(), Name: name, CreatedAt: time.Now().UTC()}
 		snap.Workspaces = append(snap.Workspaces, out)
-		snap.Memberships = append(snap.Memberships, types.Membership{WorkspaceID: out.ID, UserID: actorID, Role: "owner"})
+		snap.Memberships = append(snap.Memberships, types.Membership{WorkspaceID: out.ID, UserID: actorID, Role: string(authz.Owner)})
 		audit(snap, actorID, "workspace.create", out.ID)
 		return nil
 	})
 	return out, err
 }
-func validRole(role string) bool {
-	return slices.Contains([]string{"owner", "maintainer", "developer", "guest"}, role)
-}
 func lastOwner(snap *types.Snapshot, workspaceID, userID string) bool {
 	for _, m := range snap.Memberships {
 		u := user(snap, m.UserID)
-		if m.WorkspaceID == workspaceID && m.Role == "owner" && m.UserID != userID && u != nil && !u.Disabled {
+		if m.WorkspaceID == workspaceID && m.Role == string(authz.Owner) && m.UserID != userID && u != nil && !u.Disabled {
 			return false
 		}
 	}
@@ -596,22 +570,20 @@ func (s *State) SetMembership(actorID, workspaceID, userID, role string) (types.
 		if w == nil {
 			return problem(types.KindNotFound, "workspace not found")
 		}
-		if err := requireManager(snap, actorID, w.ID); err != nil {
+		if err := authz.Require(snap, actorID, w.ID, authz.ManageMembers); err != nil {
 			return err
 		}
-		if !validRole(role) {
+		if !authz.ValidMemberRole(role) {
 			return problem(types.KindInvalid, "invalid membership role")
 		}
 		if _, err := requireTargetUser(snap, userID); err != nil {
 			return err
 		}
-		actor := user(snap, actorID)
 		current := member(snap, w.ID, userID)
-		actorMember := member(snap, w.ID, actorID)
-		if !actor.Admin && (role == "owner" || role == "maintainer" || (current != nil && (current.Role == "owner" || current.Role == "maintainer"))) && (actorMember == nil || actorMember.Role != "owner") {
-			return problem(types.KindForbidden, "owner required to change privileged membership")
+		if err := authz.Require(snap, actorID, w.ID, authz.MembershipChange(authz.MemberRole(snap, userID, w.ID), authz.Role(role))); err != nil {
+			return err
 		}
-		if current != nil && current.Role == "owner" && role != "owner" && lastOwner(snap, w.ID, userID) {
+		if current != nil && current.Role == string(authz.Owner) && role != string(authz.Owner) && lastOwner(snap, w.ID, userID) {
 			return problem(types.KindConflict, "workspace must retain an active owner")
 		}
 		out = types.Membership{WorkspaceID: w.ID, UserID: userID, Role: role}
@@ -637,19 +609,17 @@ func (s *State) RemoveMembership(actorID, workspaceID, userID string) error {
 		if w == nil {
 			return problem(types.KindNotFound, "workspace not found")
 		}
-		if err := requireManager(snap, actorID, w.ID); err != nil {
+		if err := authz.Require(snap, actorID, w.ID, authz.ManageMembers); err != nil {
 			return err
 		}
 		m := member(snap, w.ID, userID)
 		if m == nil {
 			return problem(types.KindNotFound, "membership not found")
 		}
-		actor := user(snap, actorID)
-		am := member(snap, w.ID, actorID)
-		if !actor.Admin && (m.Role == "owner" || m.Role == "maintainer") && (am == nil || am.Role != "owner") {
-			return problem(types.KindForbidden, "owner required")
+		if err := authz.Require(snap, actorID, w.ID, authz.MembershipChange(authz.Role(m.Role), authz.None)); err != nil {
+			return err
 		}
-		if m.Role == "owner" && lastOwner(snap, w.ID, userID) {
+		if m.Role == string(authz.Owner) && lastOwner(snap, w.ID, userID) {
 			return problem(types.KindConflict, "workspace must retain an active owner")
 		}
 		snap.Memberships = slices.DeleteFunc(snap.Memberships, func(v types.Membership) bool { return v.WorkspaceID == w.ID && v.UserID == userID })
@@ -660,7 +630,7 @@ func (s *State) RemoveMembership(actorID, workspaceID, userID string) error {
 }
 func (s *State) DisableUser(actorID, userID string) error {
 	return s.mutate(func(snap *types.Snapshot) error {
-		if err := requireAdmin(snap, actorID); err != nil {
+		if err := authz.RequireAdmin(snap, actorID); err != nil {
 			return err
 		}
 		u := user(snap, userID)
@@ -671,7 +641,7 @@ func (s *State) DisableUser(actorID, userID string) error {
 			return problem(types.KindConflict, "instance must retain an active administrator")
 		}
 		for _, m := range snap.Memberships {
-			if m.UserID == u.ID && m.Role == "owner" && lastOwner(snap, m.WorkspaceID, u.ID) && !solePersonalWorkspace(snap, m.WorkspaceID, u.ID) {
+			if m.UserID == u.ID && m.Role == string(authz.Owner) && lastOwner(snap, m.WorkspaceID, u.ID) && !solePersonalWorkspace(snap, m.WorkspaceID, u.ID) {
 				return problem(types.KindConflict, "transfer workspace ownership before disabling this user")
 			}
 		}
@@ -757,7 +727,7 @@ func (s *State) CreateEnrollmentKey(actorID string, key types.EnrollmentKey) (ty
 		if sa == nil || (key.WorkspaceID != "" && sa.WorkspaceID != key.WorkspaceID) {
 			return problem(types.KindNotFound, "service account not found")
 		}
-		if err := requireManager(snap, actorID, sa.WorkspaceID); err != nil {
+		if err := authz.Require(snap, actorID, sa.WorkspaceID, authz.ManageServiceAccounts); err != nil {
 			return err
 		}
 		if sa.Status != api.StatusActive {
@@ -768,7 +738,7 @@ func (s *State) CreateEnrollmentKey(actorID string, key types.EnrollmentKey) (ty
 		}
 		seen := map[string]bool{}
 		for _, role := range key.Roles {
-			if !slices.Contains([]string{api.RoleIngress, api.RoleServe, api.RoleEgress}, role) || seen[role] {
+			if !slices.Contains(authz.AllDeviceRoles, role) || seen[role] {
 				return problem(types.KindInvalid, "invalid or duplicate enrollment role")
 			}
 			seen[role] = true
@@ -856,27 +826,14 @@ func purgeService(snap *types.Snapshot, id string) {
 	snap.Services = slices.DeleteFunc(snap.Services, func(v types.Service) bool { return v.ID == id })
 }
 
-// roleCeiling is the enrollment role ceiling. A User principal is further
-// narrowed by the current Workspace role (guests may only run ingress); a
-// Service Account has no human role, only its registration's ceiling.
+// roleCeiling is the control-plane ceiling of an Agent: what its registration
+// allows, narrowed by authz.DeviceRoles, and nothing once its principal is
+// inactive. computeEffective materializes it for the data plane.
 func roleCeiling(snap *types.Snapshot, a *types.Agent) []string {
-	if a.Principal.Type == api.PrincipalServiceAccount {
-		if !principalActive(snap, a.WorkspaceID, a.Principal) {
-			return nil
-		}
-		return slices.Clone(a.Roles)
-	}
-	m := member(snap, a.WorkspaceID, a.Principal.ID)
-	if m == nil {
+	if !principalActive(snap, a.WorkspaceID, a.Principal) {
 		return nil
 	}
-	if m.Role == "guest" {
-		if slices.Contains(a.Roles, api.RoleIngress) {
-			return []string{api.RoleIngress}
-		}
-		return nil
-	}
-	return slices.Clone(a.Roles)
+	return authz.DeviceRoles(a.Principal, authz.MemberRole(snap, a.Principal.ID, a.WorkspaceID), a.Roles)
 }
 
 // checkDesired is the automatic admission policy for a desired spec. It never
@@ -1068,8 +1025,8 @@ func (s *State) Enroll(request types.EnrollRequest) (types.EnrollResponse, error
 }
 
 // ensureServices reserves a service record for every desired service. A newly
-// published service receives the Workspace default member grant once; later
-// changes to that grant are explicit grant management, never recreated here.
+// published service receives authz.DefaultServiceGrant once; later changes to
+// that grant are explicit grant management, never recreated here.
 // Reclaiming a name can purge other Agents, so it takes an ID: callers must not
 // hold pointers into snap.Agents across this call.
 func (s *State) ensureServices(snap *types.Snapshot, agentID string) error {
@@ -1096,9 +1053,9 @@ func (s *State) ensureServices(snap *types.Snapshot, agentID string) error {
 		}
 		v := types.Service{ID: randomID(), WorkspaceID: a.WorkspaceID, AgentID: a.ID, Name: desired.Name, Hostname: desired.Name + "." + w.Name + "." + s.baseDomain, Enabled: true}
 		snap.Services = append(snap.Services, v)
-		now := time.Now().UTC()
-		snap.Grants = append(snap.Grants, types.Grant{ID: randomID(), WorkspaceID: a.WorkspaceID, ResourceType: "service", ResourceID: v.ID, SubjectType: "workspace", SubjectID: a.WorkspaceID,
-			StartsAt: now, ExpiresAt: now.Add(s.serviceGrantTTL), CreatedBy: defaultGrantCreator})
+		g := authz.DefaultServiceGrant(a.WorkspaceID, v.ID, time.Now().UTC(), s.serviceGrantTTL)
+		g.ID = randomID()
+		snap.Grants = append(snap.Grants, g)
 		audit(snap, a.Principal.Subject(), "service.publish", v.ID)
 	}
 	return nil
@@ -1315,7 +1272,9 @@ func (s *State) recordRejection(agentID string, kind types.ErrorKind, message st
 	})
 }
 
-// SnapshotForUser returns a detached, scoped view; token hashes never leave state.
+// SnapshotForUser returns a detached view scoped by the control-plane rules:
+// a person sees what they may manage, plus the Workspace catalogue that
+// authz.ViewWorkspace covers. Token hashes never leave state.
 func (s *State) SnapshotForUser(userID string) (types.Snapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1333,52 +1292,45 @@ func (s *State) SnapshotForUser(userID string) (types.Snapshot, error) {
 	if u.Admin {
 		return snap, nil
 	}
-	visible := map[string]bool{}
-	managed := map[string]bool{}
+	full := &s.snapshot
+	roles := map[string]authz.Role{}
 	for _, m := range snap.Memberships {
 		if m.UserID == userID {
-			visible[m.WorkspaceID] = true
-			managed[m.WorkspaceID] = m.Role == "owner" || m.Role == "maintainer"
+			roles[m.WorkspaceID] = authz.Role(m.Role)
 		}
 	}
-	snap.Workspaces = slices.DeleteFunc(snap.Workspaces, func(w types.Workspace) bool { return !visible[w.ID] })
-	snap.Memberships = slices.DeleteFunc(snap.Memberships, func(m types.Membership) bool { return !visible[m.WorkspaceID] })
+	hidden := func(workspaceID string, p authz.Permission) bool { return !roles[workspaceID].Can(p) }
+	snap.Workspaces = slices.DeleteFunc(snap.Workspaces, func(w types.Workspace) bool { return hidden(w.ID, authz.ViewWorkspace) })
+	snap.Memberships = slices.DeleteFunc(snap.Memberships, func(m types.Membership) bool { return hidden(m.WorkspaceID, authz.ViewWorkspace) })
 	users := map[string]bool{userID: true}
 	for _, m := range snap.Memberships {
 		users[m.UserID] = true
 	}
 	snap.Users = slices.DeleteFunc(snap.Users, func(v types.User) bool { return !users[v.ID] })
 	snap.Agents = slices.DeleteFunc(snap.Agents, func(a types.Agent) bool {
-		return !visible[a.WorkspaceID] || (!managed[a.WorkspaceID] && !isUser(a.Principal, userID))
+		return hidden(a.WorkspaceID, authz.ViewWorkspace) || !authz.CanManageAgent(roles[a.WorkspaceID], &a, userID)
 	})
 	snap.EnrollmentKeys = slices.DeleteFunc(snap.EnrollmentKeys, func(k types.EnrollmentKey) bool {
-		return !visible[k.WorkspaceID] || (!managed[k.WorkspaceID] && k.UserID != userID)
+		return hidden(k.WorkspaceID, authz.ViewWorkspace) || !authz.CanManageEnrollmentKey(roles[k.WorkspaceID], &k, userID)
 	})
-	// Service Accounts are visible and manageable only by maintainer+.
-	snap.ServiceAccounts = slices.DeleteFunc(snap.ServiceAccounts, func(v types.ServiceAccount) bool { return !managed[v.WorkspaceID] })
-	snap.Services = slices.DeleteFunc(snap.Services, func(v types.Service) bool { return !visible[v.WorkspaceID] })
-	snap.EgressRoutes = slices.DeleteFunc(snap.EgressRoutes, func(v types.EgressRoute) bool { return !visible[v.WorkspaceID] })
-	// Match the existing service-management authority: developers can manage
-	// grants on their own services, while egress and other service grants remain
-	// visible only to workspace managers.
+	snap.ServiceAccounts = slices.DeleteFunc(snap.ServiceAccounts, func(v types.ServiceAccount) bool { return hidden(v.WorkspaceID, authz.ManageServiceAccounts) })
+	snap.Services = slices.DeleteFunc(snap.Services, func(v types.Service) bool { return hidden(v.WorkspaceID, authz.ViewWorkspace) })
+	snap.EgressRoutes = slices.DeleteFunc(snap.EgressRoutes, func(v types.EgressRoute) bool { return hidden(v.WorkspaceID, authz.ViewWorkspace) })
+	// A grant is visible to whoever may manage it.
 	snap.Grants = slices.DeleteFunc(snap.Grants, func(g types.Grant) bool {
-		if managed[g.WorkspaceID] {
-			return false
-		}
-		if !visible[g.WorkspaceID] || g.ResourceType != "service" {
-			return true
-		}
-		membership := member(&snap, g.WorkspaceID, userID)
-		if membership == nil || membership.Role != "developer" {
-			return true
-		}
-		resource := service(&snap, g.ResourceID)
-		if resource == nil {
-			return true
-		}
-		provider := agent(&snap, resource.AgentID)
-		return provider == nil || !isUser(provider.Principal, userID)
+		return hidden(g.WorkspaceID, authz.ViewWorkspace) || !authz.CanManageGrant(roles[g.WorkspaceID], g.ResourceType, grantProvider(full, g), userID)
 	})
 	snap.Audit = nil
 	return snap, nil
+}
+
+// grantProvider is the Agent that publishes a service grant's resource.
+func grantProvider(snap *types.Snapshot, g types.Grant) *types.Agent {
+	if g.ResourceType != authz.ResourceService {
+		return nil
+	}
+	if v := service(snap, g.ResourceID); v != nil {
+		return agent(snap, v.AgentID)
+	}
+	return nil
 }

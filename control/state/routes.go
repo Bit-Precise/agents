@@ -10,6 +10,7 @@ import (
 	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/connection"
 	"github.com/bit-precise/agentd/policy"
+	"github.com/bit-precise/agents/control/authz"
 	"github.com/bit-precise/agents/control/types"
 )
 
@@ -29,20 +30,16 @@ func route(snap *types.Snapshot, id string) *types.EgressRoute {
 	}
 	return nil
 }
-func canManageService(snap *types.Snapshot, actorID string, v *types.Service) error {
-	if err := requireManager(snap, actorID, v.WorkspaceID); err == nil {
-		return nil
-	}
-	u, err := requireUser(snap, actorID)
-	if err != nil {
+
+// requireServiceManager checks authz.CanManageService for the actor.
+func requireServiceManager(snap *types.Snapshot, actorID string, v *types.Service) error {
+	if _, err := requireUser(snap, actorID); err != nil {
 		return err
 	}
-	m := member(snap, v.WorkspaceID, actorID)
-	a := agent(snap, v.AgentID)
-	if !u.Disabled && m != nil && m.Role == "developer" && a != nil && isUser(a.Principal, actorID) {
-		return nil
+	if !authz.CanManageService(authz.RoleOf(snap, actorID, v.WorkspaceID), agent(snap, v.AgentID), actorID) {
+		return problem(types.KindForbidden, "permission services.manage, or services.manage_own for a service of your own device, required")
 	}
-	return problem(types.KindForbidden, "service management is not permitted")
+	return nil
 }
 
 func (s *State) CreateEgressRoute(actorID string, value types.EgressRoute) (types.EgressRoute, error) {
@@ -59,7 +56,7 @@ func (s *State) CreateEgressRoute(actorID string, value types.EgressRoute) (type
 		if w == nil {
 			return problem(types.KindNotFound, "workspace not found")
 		}
-		if err := requireManager(snap, actorID, w.ID); err != nil {
+		if err := authz.Require(snap, actorID, w.ID, authz.ManageEgressRoutes); err != nil {
 			return err
 		}
 		a := agent(snap, value.AgentID)
@@ -94,71 +91,73 @@ func (s *State) CreateEgressRoute(actorID string, value types.EgressRoute) (type
 	return value, err
 }
 
+// CreateGrant is the control-plane operation that adds a data-plane grant: the
+// actor must manage the resource, the subject must suit it (authz.Accepts),
+// egress stays inside its Workspace and external sharing needs
+// authz.ShareExternally.
 func (s *State) CreateGrant(actorID string, value types.Grant) (types.Grant, error) {
 	err := s.mutate(func(snap *types.Snapshot) error {
 		w := workspace(snap, value.WorkspaceID)
 		if w == nil {
 			return problem(types.KindNotFound, "workspace not found")
 		}
+		value.WorkspaceID = w.ID
+		if _, err := requireUser(snap, actorID); err != nil {
+			return err
+		}
+		role := authz.RoleOf(snap, actorID, w.ID)
 		switch value.ResourceType {
-		case "service":
+		case authz.ResourceService:
 			v := service(snap, value.ResourceID)
 			if v == nil || v.WorkspaceID != w.ID {
 				return problem(types.KindForbidden, "service does not belong to this workspace")
 			}
-			if err := canManageService(snap, actorID, v); err != nil {
+			if err := requireServiceManager(snap, actorID, v); err != nil {
 				return err
 			}
-		case "egress":
+		case authz.ResourceEgress:
 			v := route(snap, value.ResourceID)
 			if v == nil || v.WorkspaceID != w.ID {
 				return problem(types.KindForbidden, "egress route does not belong to this workspace")
 			}
-			if err := requireManager(snap, actorID, w.ID); err != nil {
-				return err
+			if !role.Can(authz.ManageEgressRoutes) {
+				return authz.Denied(authz.ManageEgressRoutes)
 			}
 		default:
 			return problem(types.KindInvalid, "resourceType must be service or egress")
 		}
-		external := false
+		if !slices.Contains(authz.SubjectTypes, value.SubjectType) {
+			return problem(types.KindInvalid, "invalid grant subject type")
+		}
+		if !authz.Accepts(value.ResourceType, value.SubjectType) {
+			return problem(types.KindInvalid, value.SubjectType+" grants cannot open a "+value.ResourceType+" resource")
+		}
+		if !authz.NamesSubject(value.SubjectType) && value.SubjectID != "" {
+			return problem(types.KindInvalid, value.SubjectType+" grants take no subject ID")
+		}
 		switch value.SubjectType {
-		case "anonymous":
-			if value.ResourceType != "service" || value.SubjectID != "" {
-				return problem(types.KindInvalid, "anonymous grants only apply to services without a subject ID")
-			}
-			external = true
-		case "user":
+		case authz.SubjectUser:
 			if _, err := requireTargetUser(snap, value.SubjectID); err != nil {
 				return err
 			}
-			external = member(snap, w.ID, value.SubjectID) == nil
-		case "workspace":
+		case authz.SubjectWorkspace:
 			subject := workspace(snap, value.SubjectID)
 			if subject == nil {
 				return problem(types.KindNotFound, "subject workspace not found")
 			}
 			value.SubjectID = subject.ID
-			external = subject.ID != w.ID
-		case "service_account":
-			// Only the ingress path authenticates a Service Account consumer; the
-			// browser Serve path has no machine credential to present.
-			if value.ResourceType != "egress" {
-				return problem(types.KindInvalid, "service accounts can only be granted egress routes")
-			}
+		case authz.SubjectServiceAccount:
 			sa := serviceAccount(snap, value.SubjectID)
 			if sa == nil || sa.WorkspaceID != w.ID || sa.Status != api.StatusActive {
 				return problem(types.KindNotFound, "service account not found in this workspace")
 			}
-		default:
-			return problem(types.KindInvalid, "invalid grant subject type")
 		}
-		if value.ResourceType == "egress" && external {
+		external := authz.External(snap, value)
+		if value.ResourceType == authz.ResourceEgress && external {
 			return problem(types.KindForbidden, "egress cannot be shared outside its workspace")
 		}
-		if external {
-			if err := requireManager(snap, actorID, w.ID); err != nil {
-				return problem(types.KindForbidden, "external or anonymous sharing requires a workspace manager")
-			}
+		if external && !role.Can(authz.ShareExternally) {
+			return authz.Denied(authz.ShareExternally)
 		}
 		now := time.Now()
 		if value.StartsAt.IsZero() {
@@ -168,7 +167,6 @@ func (s *State) CreateGrant(actorID string, value types.Grant) (types.Grant, err
 			return problem(types.KindInvalid, "grant needs an ordered, finite window of at most 30 days")
 		}
 		value.ID = randomID()
-		value.WorkspaceID = w.ID
 		value.Revoked = false
 		value.External = external
 		value.CreatedBy = actorID
@@ -186,15 +184,15 @@ func (s *State) RevokeGrant(actorID, id string) error {
 			if g.ID != id {
 				continue
 			}
-			if g.ResourceType == "service" {
+			if g.ResourceType == authz.ResourceService {
 				v := service(snap, g.ResourceID)
 				if v == nil {
 					return problem(types.KindNotFound, "service not found")
 				}
-				if err := canManageService(snap, actorID, v); err != nil {
+				if err := requireServiceManager(snap, actorID, v); err != nil {
 					return err
 				}
-			} else if err := requireManager(snap, actorID, g.WorkspaceID); err != nil {
+			} else if err := authz.Require(snap, actorID, g.WorkspaceID, authz.ManageEgressRoutes); err != nil {
 				return err
 			}
 			g.Revoked = true
@@ -210,12 +208,11 @@ func (s *State) RevokeAgent(actorID, id string) error {
 		if a == nil {
 			return problem(types.KindNotFound, "agent not found")
 		}
-		if !isUser(a.Principal, actorID) {
-			if err := requireManager(snap, actorID, a.WorkspaceID); err != nil {
-				return err
-			}
-		} else if _, err := requireUser(snap, actorID); err != nil {
+		if _, err := requireUser(snap, actorID); err != nil {
 			return err
+		}
+		if !authz.CanManageAgent(authz.RoleOf(snap, actorID, a.WorkspaceID), a, actorID) {
+			return authz.Denied(authz.ManageAgents)
 		}
 		revokeAgent(snap, a, actorID, "explicit")
 		return nil
@@ -228,12 +225,11 @@ func (s *State) RevokeEnrollmentKey(actorID, id string) error {
 			if k.ID != id {
 				continue
 			}
-			if k.UserID != actorID {
-				if err := requireManager(snap, actorID, k.WorkspaceID); err != nil {
-					return err
-				}
-			} else if _, err := requireUser(snap, actorID); err != nil {
+			if _, err := requireUser(snap, actorID); err != nil {
 				return err
+			}
+			if !authz.CanManageEnrollmentKey(authz.RoleOf(snap, actorID, k.WorkspaceID), k, actorID) {
+				return authz.Denied(authz.ManageServiceAccounts)
 			}
 			revokeEnrollmentKey(snap, k)
 			audit(snap, actorID, "enrollment_key.revoke", id)
@@ -249,7 +245,7 @@ func (s *State) SetServiceEnabled(actorID, id string, enabled bool) (types.Servi
 		if v == nil {
 			return problem(types.KindNotFound, "service not found")
 		}
-		if err := canManageService(snap, actorID, v); err != nil {
+		if err := requireServiceManager(snap, actorID, v); err != nil {
 			return err
 		}
 		v.Enabled = enabled
@@ -266,7 +262,7 @@ func (s *State) SetEgressRouteEnabled(actorID, id string, enabled bool) (types.E
 		if v == nil {
 			return problem(types.KindNotFound, "egress route not found")
 		}
-		if err := requireManager(snap, actorID, v.WorkspaceID); err != nil {
+		if err := authz.Require(snap, actorID, v.WorkspaceID, authz.ManageEgressRoutes); err != nil {
 			return err
 		}
 		if enabled {
@@ -288,35 +284,6 @@ func (s *State) SetEgressRouteEnabled(actorID, id string, enabled bool) (types.E
 	return out, err
 }
 
-// grantDeadline evaluates the scope of each grant now, not when it was made:
-// an internal user grant only matches while its subject is still a member of
-// the resource Workspace, so leaving cannot turn it into an external share.
-// User, Service Account and Workspace-member grants never stand in for each
-// other; a Workspace grant covers its human members only.
-func grantDeadline(snap *types.Snapshot, resourceType, resourceID string, consumer api.Principal, now time.Time) time.Time {
-	var until time.Time
-	u := user(snap, consumer.ID)
-	humanActive := consumer.Type == api.PrincipalUser && u != nil && !u.Disabled
-	sa := serviceAccount(snap, consumer.ID)
-	machineActive := consumer.Type == api.PrincipalServiceAccount && sa != nil && sa.Status == api.StatusActive
-	for _, g := range snap.Grants {
-		if g.ResourceType != resourceType || g.ResourceID != resourceID || g.Revoked || now.Before(g.StartsAt) || !now.Before(g.ExpiresAt) {
-			continue
-		}
-		match := g.SubjectType == "anonymous" && resourceType == "service"
-		if humanActive {
-			userMatch := g.SubjectType == "user" && g.SubjectID == consumer.ID && (g.External || member(snap, g.WorkspaceID, consumer.ID) != nil)
-			match = match || userMatch || g.SubjectType == "workspace" && member(snap, g.SubjectID, consumer.ID) != nil
-		}
-		if machineActive {
-			match = match || g.SubjectType == "service_account" && g.SubjectID == consumer.ID && sa.WorkspaceID == g.WorkspaceID
-		}
-		if match && g.ExpiresAt.After(until) {
-			until = g.ExpiresAt
-		}
-	}
-	return until
-}
 func cappedDeadline(until time.Time) time.Time {
 	limit := time.Now().Add(time.Minute)
 	if until.Before(limit) {
@@ -373,7 +340,7 @@ func (s *State) ResolveServe(host, userID string) (types.Decision, error) {
 	if userID != "" {
 		consumer = userPrincipal(userID)
 	}
-	until := grantDeadline(snap, "service", found.ID, consumer, time.Now())
+	until := authz.Deadline(snap, authz.ResourceService, found.ID, consumer, time.Now())
 	if until.IsZero() {
 		return types.Decision{}, problem(types.KindForbidden, "service access is not granted")
 	}
@@ -434,7 +401,7 @@ func (s *State) ResolveEgress(workspaceSlug string, consumer api.Principal, host
 		return len(b.Rule.Domain.Suffix) - len(a.Rule.Domain.Suffix)
 	})
 	r := candidates[0]
-	until := grantDeadline(snap, "egress", r.ID, consumer, time.Now())
+	until := authz.Deadline(snap, authz.ResourceEgress, r.ID, consumer, time.Now())
 	if until.IsZero() {
 		return types.Decision{}, problem(types.KindForbidden, "selected egress route is not granted")
 	}

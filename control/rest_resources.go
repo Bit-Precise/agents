@@ -11,6 +11,7 @@ import (
 
 	"github.com/bit-precise/agentd/api"
 	"github.com/bit-precise/agentd/policy"
+	"github.com/bit-precise/agents/control/authz"
 	"github.com/bit-precise/agents/control/types"
 	"github.com/bit-precise/agents/edge"
 )
@@ -231,21 +232,16 @@ func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, r
 		if err != nil {
 			return nil, err
 		}
-		managed := map[string]bool{}
-		own := map[string]bool{}
-		for _, m := range snap.Memberships {
-			if m.UserID == u.ID && (m.Role == "owner" || m.Role == "maintainer") {
-				managed[m.WorkspaceID] = true
-			}
+		// Connections and flows follow device management (authz.CanManageAgent);
+		// a flow is also visible to its own consumer.
+		agents := map[string]*types.Agent{}
+		for i := range snap.Agents {
+			agents[snap.Agents[i].ID] = &snap.Agents[i]
 		}
-		for _, v := range snap.Agents {
-			if principalUser(v.Principal) == u.ID {
-				own[v.ID] = true
-			}
-		}
+		role := func(workspaceID string) authz.Role { return authz.RoleOf(&snap, u.ID, workspaceID) }
 		if resource == "connections" {
 			for _, v := range view.Connections {
-				if !u.Admin && !managed[v.WorkspaceID] && !own[v.AgentID] {
+				if !authz.CanManageAgent(role(v.WorkspaceID), agents[v.AgentID], u.ID) {
 					continue
 				}
 				rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"agentId": v.AgentID, "role": v.Role, "connectedAt": timeKey(v.ConnectedAt)}))
@@ -257,7 +253,7 @@ func (a *App) resourceRows(r *http.Request, u types.User, snap types.Snapshot, r
 				if v.Consumer != nil {
 					consumer = *v.Consumer
 				}
-				if !u.Admin && !managed[v.WorkspaceID] && principalUser(consumer) != u.ID {
+				if !role(v.WorkspaceID).Can(authz.ManageAgents) && principalUser(consumer) != u.ID {
 					continue
 				}
 				rows = append(rows, row(v.ID, v.WorkspaceID, v, map[string]string{"agentId": v.AgentID, "consumerType": consumer.Type, "consumerId": consumer.ID, "resourceId": v.ResourceID, "purpose": v.Purpose, "state": v.State, "startedAt": timeKey(v.StartedAt)}))

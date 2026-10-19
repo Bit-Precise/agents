@@ -14,7 +14,8 @@
 | `hscontrol` 应用入口 | `control/app.go`、`handlers.go` | 组装控制面、Edge、Console；HTTP 路由与错误映射 |
 | `hscontrol/types` | `control/types` | 持久实体、身份与路由决策 |
 | `hscontrol/db` | `control/db` | SQLite/PostgreSQL、显式迁移、外键、事务和 revision CAS |
-| `hscontrol/state` | `control/state` | 唯一变更入口、RBAC、配置自动校验、决策与通知 |
+| `hscontrol/state` | `control/state` | 唯一变更入口、配置自动校验、决策与通知；每个变更调用 `control/authz` |
+| `hscontrol/policy` | `control/authz` | 授权模型：控制面 RBAC 矩阵与数据面 Grant 规则，见 [授权模型](authorization.md) |
 | 独立数据面适配 | `edge` | XHTTP 会话绑定、连接目录、业务流转发与撤权 |
 
 这里参考的是结构和状态管理责任，不复用 WireGuard、DERP、Tailscale 节点协议。客户端仍按 cloudflared 的 `config / connection / orchestration / supervisor` 分层。
@@ -48,7 +49,7 @@ erDiagram
 - EnrollmentKey 是无人值守注册凭据，绑定一个 Service Account，有角色上限、次数、到期和撤销状态；迁移保留的旧 User 密钥只兼容到期。EnrollmentAuthorization 是一次 `agentd login` 的确认与一次性兑换记录。两者都只用于首次注册，不是业务会话凭据。
 - Service 固定绑定一个 Agent 和服务名称；源站 URL 由该 Agent 的配置声明。访问主机名为 `<service>.<workspace>.<instance-host>`。
 - EgressRoute 将一个域名/端口/TLS 规则固定绑定到一个 Agent，并有优先级。它不授予用户访问权。
-- Grant 将 Service 或 EgressRoute 授权给 User、Workspace 的人类成员，将 EgressRoute 授权给同 Workspace 的 Service Account，或仅对 Service 授权给匿名访问者。多条有效 Grant 是并集；撤销其中一条不撤销其他有效授权。
+- Grant 是数据面授权：将 Service 或 EgressRoute 授权给 User、Workspace 的人类成员，将 EgressRoute 授权给同 Workspace 的 Service Account，或仅对 Service 授权给所有已登录用户（`authenticated`）或匿名访问者。多条有效 Grant 是并集；撤销其中一条不撤销其他有效授权。管理操作的权限（控制面 RBAC）与 Grant 互相独立，两者见 [授权模型](authorization.md)。
 - Token 分为 `user / enrollment / control / access / provider`，用途不可替代。原文仅在创建或注册时交付，SQL 保存哈希。
 - 连接目录与 Flow 是进程运行态，不是数据库中 Agent 的在线字段。进程重启后凭据和策略保留，在线连接由 agentd 重连重建。
 
@@ -112,7 +113,7 @@ Egress 路径：
 
 ## 主要接口
 
-管理 REST API 位于 `/v1`，完整请求和响应见 [OpenAPI](../api/openapi.json)。管理员的全局资源位于 `/v1/admin/`，普通用户从 `/v1/workspaces` 选择工作空间后使用 `/v1/workspaces/{workspaceId}/...` 子资源。所有管理员路由先验证实例管理员身份；普通列表和详情按现有成员、owner/maintainer 和资源归属规则裁剪，筛选参数只缩小可见范围。不可见的资源详情返回 404。
+管理 REST API 位于 `/v1`，完整请求和响应见 [OpenAPI](../api/openapi.json)。管理员的全局资源位于 `/v1/admin/`，普通用户从 `/v1/workspaces` 选择工作空间后使用 `/v1/workspaces/{workspaceId}/...` 子资源。所有管理员路由先验证实例管理员身份；普通列表和详情按 [授权模型](authorization.md) 的“可见即可管理”规则裁剪，与写操作使用同一套 `control/authz` 判断，筛选参数只缩小可见范围。不可见的资源详情返回 404。`GET /v1/workspaces/{workspaceId}/permissions` 返回调用者在该工作空间的角色与权限列表，Console 据此显示操作。
 
 | 资源路径 | 方法与用途 |
 |---|---|
@@ -129,7 +130,8 @@ Egress 路径：
 | Workspace 的 `/memberships`、`/memberships/{userId}` | GET 列表/详情；PUT `{role}` 幂等设置成员（200）；DELETE 移除（204） |
 | Workspace 的 `/service-accounts`、`/service-accounts/{serviceAccountId}` | maintainer+ 的 GET 列表/详情、POST 创建（201）；PATCH `{description}` 或 `{status:"revoked"}`（终态）；其他成员看不到 SA |
 | Workspace 的 `/service-accounts/{serviceAccountId}/enrollment-keys` | POST 为该 SA 创建无人值守注册密钥（201，一次性返回秘密，Location 指向 `/enrollment-keys/{keyId}`）；不接收 User |
-| Workspace 的 `/enrollment-keys`、`/grants` | GET 列表与详情；PATCH 单项 `{revoked:true}` 撤销，不能恢复；POST `/grants` 创建（201，主体可为 `service_account`，仅出口） |
+| Workspace 的 `/enrollment-keys`、`/grants` | GET 列表与详情；PATCH 单项 `{revoked:true}` 撤销，不能恢复；POST `/grants` 创建（201；`service_account` 仅出口，`authenticated` 与 `anonymous` 仅服务） |
+| Workspace 的 `/permissions` | GET 调用者在该工作空间的 `{role, admin, permissions}` |
 | `/v1/device-authorizations/{id}`、`/confirm`、`/reject` | Console 的 `agentd login` 确认页：读取可选项、提交 Workspace 与主体或拒绝；仅限发起该授权的浏览器中经 SSO 的本人 Cookie 会话 |
 | `/v1/agent-enrollments` | POST 以 Device Flow access token（Bearer）一次性兑换新 Agent（201）；已兑换返回 409 |
 | Workspace 的 `/connections`、`/flows` | GET 可见在线连接和流；Edge 不可用返回 503，不能将其误认为空列表 |
@@ -149,4 +151,4 @@ Agent 是设备身份，可以同时承担 ingress 和 egress 角色，也可以
 
 测试覆盖真实 SQLite/HTTP Control/Edge/Supervisor、CONNECT 与 SOCKS、目标 TLS 原样传递、撤销活跃流、自动校验与拒绝、生效配置变化不重连、v2→v3 迁移、名称回收、重连、租户隔离、Cookie/CSRF/平台令牌边界。PostgreSQL 独立 CI 使用真实数据库验证迁移、重开、事务冲突与外键回滚。浏览器验收包括创建注册密钥、CLI 注册、设备上线及服务 SSO。
 
-OIDC 已支持 discovery、授权码 + PKCE、state/nonce、ID token 验证和 issuer/subject 绑定，并通过 v1→v2 显式迁移持久化身份关联；v2→v3 迁移移除审批模型，v3→v4 迁移引入 Service Account 与 typed principal。当前仍没有 TUN、WSS、多 Edge 路由/迁移、自动秘密轮换或真实 CDN 兼容性验收。SQL 已按行增量写入，但 Control 仍在内存中保存完整快照并只支持单控制进程。生产部署必须为控制域、承载域与服务域准备 DNS 和正确的证书：`*.agents.example.com` 不覆盖 `hello.demo.agents.example.com`，需要覆盖相应 Workspace 服务层级。
+OIDC 已支持 discovery、授权码 + PKCE、state/nonce、ID token 验证和 issuer/subject 绑定，并通过 v1→v2 显式迁移持久化身份关联；v2→v3 迁移移除审批模型，v3→v4 迁移引入 Service Account 与 typed principal，v4→v5 迁移加入 `authenticated` 授权主体。当前仍没有 TUN、WSS、多 Edge 路由/迁移、自动秘密轮换或真实 CDN 兼容性验收。SQL 已按行增量写入，但 Control 仍在内存中保存完整快照并只支持单控制进程。生产部署必须为控制域、承载域与服务域准备 DNS 和正确的证书：`*.agents.example.com` 不覆盖 `hello.demo.agents.example.com`，需要覆盖相应 Workspace 服务层级。

@@ -5,8 +5,18 @@ import (
 	"strings"
 
 	"github.com/bit-precise/agentd/api"
+	"github.com/bit-precise/agents/control/authz"
 	"github.com/bit-precise/agents/control/types"
 )
+
+// WorkspacePermissions is what the caller may do in one Workspace on the
+// control plane. The Console shows actions by it; Control still checks every
+// operation itself.
+type WorkspacePermissions struct {
+	Role        string             `json:"role,omitempty"`
+	Admin       bool               `json:"admin"`
+	Permissions []authz.Permission `json:"permissions"`
+}
 
 // restAuth authenticates before authorization, so invalid credentials are 401
 // while an authenticated caller with a rejected Origin, CSRF token or role is 403.
@@ -199,6 +209,15 @@ func (a *App) registerREST() {
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/ingresses/{agentId}", a.restRead("ingresses", false))
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/egresses", a.restRead("egresses", false))
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/egresses/{agentId}", a.restRead("egresses", false))
+	m.HandleFunc("GET /v1/workspaces/{workspaceId}/permissions", a.restAuth(false, func(w http.ResponseWriter, r *http.Request, u types.User) {
+		snap, err := a.restSnapshot(r, u)
+		if err != nil {
+			respond(w, nil, err, 200)
+			return
+		}
+		id := r.PathValue("workspaceId")
+		writeJSON(w, 200, WorkspacePermissions{Role: string(authz.MemberRole(&snap, u.ID, id)), Admin: u.Admin, Permissions: authz.RoleOf(&snap, u.ID, id).Permissions()})
+	}))
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/memberships", a.restRead("memberships", false))
 	m.HandleFunc("GET /v1/workspaces/{workspaceId}/memberships/{userId}", a.restRead("memberships", false))
 	m.HandleFunc("POST /v1/admin/users", a.restCreate("users", true))

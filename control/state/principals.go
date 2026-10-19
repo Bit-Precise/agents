@@ -1,12 +1,12 @@
 package state
 
 import (
-	"slices"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/bit-precise/agentd/api"
+	"github.com/bit-precise/agents/control/authz"
 	"github.com/bit-precise/agents/control/types"
 )
 
@@ -49,8 +49,8 @@ func validDescription(s string) bool {
 	return len(s) <= 256 && strings.IndexFunc(s, unicode.IsControl) < 0
 }
 
-// CreateServiceAccount adds a machine principal to one Workspace. Only
-// maintainers, owners and instance administrators manage Service Accounts.
+// CreateServiceAccount adds a machine principal to one Workspace. Managing
+// Service Accounts needs authz.ManageServiceAccounts.
 func (s *State) CreateServiceAccount(actorID, workspaceID, name, description string) (types.ServiceAccount, error) {
 	var out types.ServiceAccount
 	name, err := label(name)
@@ -65,7 +65,7 @@ func (s *State) CreateServiceAccount(actorID, workspaceID, name, description str
 		if w == nil {
 			return problem(types.KindNotFound, "workspace not found")
 		}
-		if err := requireManager(snap, actorID, w.ID); err != nil {
+		if err := authz.Require(snap, actorID, w.ID, authz.ManageServiceAccounts); err != nil {
 			return err
 		}
 		for _, v := range snap.ServiceAccounts {
@@ -93,7 +93,7 @@ func (s *State) UpdateServiceAccount(actorID, id, description string) (types.Ser
 		if sa == nil {
 			return problem(types.KindNotFound, "service account not found")
 		}
-		if err := requireManager(snap, actorID, sa.WorkspaceID); err != nil {
+		if err := authz.Require(snap, actorID, sa.WorkspaceID, authz.ManageServiceAccounts); err != nil {
 			return err
 		}
 		if sa.Status != api.StatusActive {
@@ -116,7 +116,7 @@ func (s *State) RevokeServiceAccount(actorID, id string) error {
 		if sa == nil {
 			return problem(types.KindNotFound, "service account not found")
 		}
-		if err := requireManager(snap, actorID, sa.WorkspaceID); err != nil {
+		if err := authz.Require(snap, actorID, sa.WorkspaceID, authz.ManageServiceAccounts); err != nil {
 			return err
 		}
 		if sa.Status == api.StatusRevoked {
@@ -130,19 +130,12 @@ func (s *State) RevokeServiceAccount(actorID, id string) error {
 }
 
 // canChooseServiceAccount reports whether the actor may register a device as
-// this Service Account right now: maintainer+ of its Workspace or instance admin.
+// this Service Account right now.
 func canChooseServiceAccount(snap *types.Snapshot, actorID string, sa *types.ServiceAccount) bool {
-	return sa != nil && sa.Status == api.StatusActive && requireManager(snap, actorID, sa.WorkspaceID) == nil
+	return sa != nil && sa.Status == api.StatusActive && authz.Require(snap, actorID, sa.WorkspaceID, authz.ManageServiceAccounts) == nil
 }
 
-// allowedRoles is the role ceiling a Device Flow selection grants: a person's
-// own device follows their Workspace role, a Service Account may run all roles.
+// allowedRoles is the role ceiling a Device Flow selection grants.
 func allowedRoles(snap *types.Snapshot, workspaceID string, p api.Principal) []string {
-	all := []string{api.RoleIngress, api.RoleServe, api.RoleEgress}
-	if p.Type == api.PrincipalUser {
-		if m := member(snap, workspaceID, p.ID); m != nil && m.Role == "guest" {
-			return []string{api.RoleIngress}
-		}
-	}
-	return slices.Clone(all)
+	return authz.DeviceRoles(p, authz.MemberRole(snap, p.ID, workspaceID), authz.AllDeviceRoles)
 }

@@ -37,6 +37,18 @@ func TestSQLiteCompositeForeignKeysAndRollback(t *testing.T) {
 	if _, err := store.sql.Exec("INSERT INTO memberships(workspace_id,user_id,role,payload) VALUES('w1','u','superuser','{}')"); err == nil {
 		t.Fatal("undefined membership role accepted")
 	}
+	// Version 5: an authenticated grant names no subject and opens services only.
+	exec("INSERT INTO egress_routes(id,workspace_id,agent_id,name,payload) VALUES('r','w1','a','out','{}')")
+	exec("INSERT INTO grants(id,workspace_id,resource_type,service_id,subject_type,payload) VALUES('everyone','w1','service','svc','authenticated','{}')")
+	for _, statement := range []string{
+		"INSERT INTO grants(id,workspace_id,resource_type,service_id,subject_type,subject_user_id,payload) VALUES('named','w1','service','svc','authenticated','u','{}')",
+		"INSERT INTO grants(id,workspace_id,resource_type,route_id,subject_type,payload) VALUES('exit','w1','egress','r','authenticated','{}')",
+		"INSERT INTO grants(id,workspace_id,resource_type,service_id,subject_type,payload) VALUES('unknown','w1','service','svc','everyone','{}')",
+	} {
+		if _, err := store.sql.Exec(statement); err == nil {
+			t.Fatalf("grant subject constraints accepted %s", statement)
+		}
+	}
 }
 
 func TestVersionOneMigrationPreservesUsersTokensAndRevision(t *testing.T) {
@@ -84,7 +96,7 @@ func TestVersionOneMigrationPreservesUsersTokensAndRevision(t *testing.T) {
 		t.Fatalf("migration altered v1 data: %+v", loaded)
 	}
 	var version int
-	if err := store.sql.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 4 {
+	if err := store.sql.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 5 {
 		t.Fatalf("migration version %d: %v", version, err)
 	}
 	previous := loaded
@@ -203,7 +215,7 @@ func TestApprovalRemovalMigrationKeepsTraceAndGrantScope(t *testing.T) {
 	var version int
 	var userID string
 	var serviceAccountID sql.NullString
-	if err = store.sql.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 4 {
+	if err = store.sql.QueryRow("SELECT schema_version FROM control_meta WHERE id=1").Scan(&version); err != nil || version != 5 {
 		t.Fatalf("schema version %d, %v", version, err)
 	}
 	if err = store.sql.QueryRow("SELECT user_id, service_account_id FROM agents WHERE id='a'").Scan(&userID, &serviceAccountID); err != nil || userID != "dev" || serviceAccountID.Valid {

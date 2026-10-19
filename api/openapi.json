@@ -2280,7 +2280,14 @@
             "name": "subjectType",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "user",
+                "workspace",
+                "anonymous",
+                "authenticated",
+                "service_account"
+              ]
             }
           },
           {
@@ -4110,7 +4117,14 @@
             "name": "subjectType",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "user",
+                "workspace",
+                "anonymous",
+                "authenticated",
+                "service_account"
+              ]
             }
           },
           {
@@ -5296,6 +5310,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/workspaces/{workspaceId}/permissions": {
+      "get": {
+        "operationId": "getWorkspacePermissions",
+        "tags": [
+          "Management"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePermissions"
                 }
               }
             }
@@ -6612,9 +6666,10 @@
               "user",
               "workspace",
               "anonymous",
+              "authenticated",
               "service_account"
             ],
-            "description": "workspace matches human members only; service_account grants are for egress."
+            "description": "anonymous and authenticated (every signed-in user) open services and take no subjectId; workspace matches human members only; service_account grants are for egress. See docs/authorization.md."
           },
           "subjectId": {
             "type": "string"
@@ -7063,9 +7118,10 @@
               "user",
               "workspace",
               "anonymous",
+              "authenticated",
               "service_account"
             ],
-            "description": "workspace matches human members only; service_account grants are for egress."
+            "description": "anonymous and authenticated (every signed-in user) open services and take no subjectId; workspace matches human members only; service_account grants are for egress. See docs/authorization.md."
           },
           "subjectId": {
             "type": "string"
@@ -7669,9 +7725,10 @@
               "user",
               "workspace",
               "anonymous",
+              "authenticated",
               "service_account"
             ],
-            "description": "workspace matches human members only; service_account grants are for egress."
+            "description": "anonymous and authenticated (every signed-in user) open services and take no subjectId; workspace matches human members only; service_account grants are for egress. See docs/authorization.md."
           },
           "subjectId": {
             "type": "string"
@@ -8473,6 +8530,49 @@
           "workspace",
           "name",
           "desired"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspacePermissions": {
+        "type": "object",
+        "description": "What the caller may do in the Workspace on the control plane. The Console shows actions by it; Control still checks every operation. See docs/authorization.md.",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "maintainer",
+              "developer",
+              "guest"
+            ],
+            "description": "The caller's Membership role; absent when an instance administrator is not a member."
+          },
+          "admin": {
+            "type": "boolean",
+            "description": "The caller is an instance administrator and holds every permission."
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "workspace.view",
+                "members.manage",
+                "members.manage_privileged",
+                "service_accounts.manage",
+                "agents.manage",
+                "agents.provide",
+                "services.manage",
+                "services.manage_own",
+                "egress_routes.manage",
+                "grants.share_external"
+              ]
+            }
+          }
+        },
+        "required": [
+          "admin",
+          "permissions"
         ],
         "additionalProperties": false
       }

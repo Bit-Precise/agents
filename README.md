@@ -69,4 +69,6 @@ Console 使用 React、TypeScript、shadcn/ui。前端 API 类型、客户端和
 
 Agent 属于 Workspace，运行主体恰为一个 User 或单 Workspace 的 Service Account。个人设备执行 `agentd login`：经 Hydra 的 OAuth Device Flow，本人在浏览器完成 SSO、选择 Workspace 与本人/SA 身份，再以限定用途、一次性的 access token 换取每设备独立凭据；无人值守设备使用服务账号的注册密钥。身份、权限与策略自动校验通过即接入，没有人工审批；配置变更也按策略直接接受或拒绝。SA 由 maintainer 及以上管理，不能登录 Console。实体与状态机见 [model](docs/model.md)。
 
-目前没有真实 CDN 兼容性验收、自动秘密轮换或多 Edge 目录。OIDC（v1→v2）、取消审批（v2→v3）与 Service Account（v3→v4）都是显式数据库迁移，保留现有用户、设备、授权和凭据。Control 启动时需要身份提供方 discovery 可达；浏览器会话不超过 ID token 到期时间及 8 小时，不持久化 IdP tokens。
+授权分两层：控制面 RBAC 决定 owner / maintainer / developer / guest 能执行哪些管理操作；数据面 Grant 决定匿名访问者、所有已登录用户、指定用户、工作空间成员或服务账号能使用哪个服务或出口路由。两者的完整表格见 [授权模型](docs/authorization.md)。
+
+目前没有真实 CDN 兼容性验收、自动秘密轮换或多 Edge 目录。OIDC（v1→v2）、取消审批（v2→v3）、Service Account（v3→v4）与 `authenticated` 授权主体（v4→v5）都是显式数据库迁移，保留现有用户、设备、授权和凭据。Control 启动时需要身份提供方 discovery 可达；浏览器会话不超过 ID token 到期时间及 8 小时，不持久化 IdP tokens。

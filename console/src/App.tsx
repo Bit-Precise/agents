@@ -224,7 +224,7 @@ function WorkspaceRoute({
   }, [path, section, workspaceId]);
   useEffect(() => {
     const abort = new AbortController();
-    loadWorkspace(user, workspaceId, abort.signal)
+    loadWorkspace(workspaceId, abort.signal)
       .then(setScope)
       .catch(
         (e) =>
@@ -264,7 +264,7 @@ function WorkspaceRoute({
     <WorkspaceProvider value={scope}>
       <AppLayout
         workspace={scope.workspace}
-        role={scope.membership?.role}
+        role={scope.role}
         workspaceSection={section}
         breadcrumbs={[workspaceLabel(scope.workspace.name, user.id), title]}
       >

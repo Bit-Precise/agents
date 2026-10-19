@@ -38,10 +38,14 @@ import { usePage, useTableState } from "@/lib/use-page";
 import { enabledRoles, isSelf, serviceURL, short } from "@/lib/format";
 import { navigate } from "@/lib/router";
 import { paths } from "@/lib/routes";
-import { useSession, useUser } from "@/lib/session";
+import { useSession, useUser, type WorkspaceScope } from "@/lib/session";
 
 export type Scope =
-  { admin: true } | { admin: false; workspaceId: string; manager: boolean };
+  | { admin: true }
+  | { admin: false; workspaceId: string; can: WorkspaceScope["can"] };
+// allowed reports a workspace permission; an administrator's page holds all.
+const allowed = (scope: Scope, p: Parameters<WorkspaceScope["can"]>[0]) =>
+  scope.admin || scope.can(p);
 const scopeKey = (scope: Scope) => (scope.admin ? "admin" : scope.workspaceId);
 
 function useOnline(scope: Scope) {
@@ -163,8 +167,7 @@ export function AgentsTable({ scope }: { scope: Scope }) {
             查看详情
           </DropdownMenuItem>
           {a.status !== "revoked" &&
-            (scope.admin ||
-              scope.manager ||
+            (allowed(scope, "agents.manage") ||
               isSelf(a.principal, viewer.id)) && (
               <>
                 <DropdownMenuSeparator />
@@ -376,7 +379,8 @@ function ServerActions({
   const [granting, setGranting] = useState(false);
   const agent = useEntity("agents", server.agentId, server.workspaceId);
   const manage =
-    scope.admin || scope.manager || isSelf(agent?.principal, viewer.id);
+    allowed(scope, "services.manage") ||
+    (allowed(scope, "services.manage_own") && isSelf(agent?.principal, viewer.id));
   if (!manage) return null;
   return (
     <>
@@ -437,7 +441,6 @@ function ServerActions({
       {granting && !scope.admin && (
         <GrantDialog
           workspaceId={server.workspaceId}
-          manager={scope.manager}
           resource={{
             type: "service",
             id: server.serviceId,

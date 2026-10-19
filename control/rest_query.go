@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bit-precise/agents/control/authz"
 	"github.com/bit-precise/agents/control/types"
 )
 
@@ -71,7 +72,7 @@ func resourcePage(r *http.Request, resource string, rows []resourceRow, snap typ
 			case resource == "workspaces" && key == "userId":
 				match = membershipMatches(snap, item.id, value, "")
 			case resource == "workspaces" && key == "ownerId":
-				match = membershipMatches(snap, item.id, value, "owner")
+				match = membershipMatches(snap, item.id, value, string(authz.Owner))
 			default:
 				match = item.fields[key] == value
 			}
@@ -175,11 +176,11 @@ func parseResourceQuery(r *http.Request, spec querySpec, resource string) (map[s
 				return nil, invalidQuery("invalid route kind")
 			}
 		case "resourceType":
-			if !slices.Contains([]string{"service", "egress"}, value) {
+			if value != authz.ResourceService && value != authz.ResourceEgress {
 				return nil, invalidQuery("invalid resource type")
 			}
 		case "subjectType":
-			if !slices.Contains([]string{"user", "workspace", "anonymous"}, value) {
+			if !slices.Contains(authz.SubjectTypes, value) {
 				return nil, invalidQuery("invalid subject type")
 			}
 		case "purpose":
@@ -187,11 +188,11 @@ func parseResourceQuery(r *http.Request, spec querySpec, resource string) (map[s
 				return nil, invalidQuery("invalid flow purpose")
 			}
 		case "role":
-			roles := []string{"owner", "maintainer", "developer", "guest"}
+			valid := authz.ValidMemberRole(value)
 			if resource == "connections" {
-				roles = []string{"provider", "access"}
+				valid = value == "provider" || value == "access"
 			}
-			if !slices.Contains(roles, value) {
+			if !valid {
 				return nil, invalidQuery("invalid role")
 			}
 		}
