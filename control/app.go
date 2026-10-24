@@ -129,9 +129,11 @@ func newApp(ctx context.Context, cfg Config, adminToken, internalToken string, s
 	a.routes()
 	runtimeCtx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
-	if a.Edge != nil {
+	if e := a.Edge; e != nil {
+		// Run the Edge built here even if the goroutine starts late: a.Edge can
+		// be replaced afterwards (the servertest short-lease harness does so).
 		a.wg.Add(1)
-		go func() { defer a.wg.Done(); _ = a.Edge.Run(runtimeCtx) }()
+		go func() { defer a.wg.Done(); _ = e.Run(runtimeCtx) }()
 	}
 	if a.device != nil {
 		a.wg.Add(1)
