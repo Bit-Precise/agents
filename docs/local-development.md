@@ -7,7 +7,6 @@
 ## 1. 构建与初始化服务端
 
 ```sh
-export GOPRIVATE=github.com/bit-precise/agentd
 go mod download
 make build
 make -C ../agentd agentd

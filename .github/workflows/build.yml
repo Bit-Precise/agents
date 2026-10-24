@@ -50,10 +50,6 @@ jobs:
           npm run typecheck --prefix console
           npm run build --prefix console
           git diff --exit-code -- control/assets/web
-      - name: Authenticate read-only SDK access
-        env:
-          AGENTD_DEPLOY_KEY: ${{ secrets.AGENTD_DEPLOY_KEY }}
-        run: source scripts/setup-sdk-ssh.sh
       - name: Test SQL, component RPC, routing and client interoperability
         env:
           AGENTS_TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/agents_test?sslmode=disable
@@ -66,9 +62,6 @@ jobs:
           go test -mod=readonly -race -timeout=120s ./...
       - name: Exercise Console REST navigation in Chrome
         run: npm run test:ui --prefix console
-      - name: Stop SDK authentication agent
-        if: always()
-        run: if [ -n "${SSH_AGENT_PID:-}" ]; then ssh-agent -k >/dev/null; fi
 
   chart:
     runs-on: ubuntu-latest
@@ -121,10 +114,6 @@ jobs:
             version="sha-${GITHUB_SHA:0:12}"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Authenticate read-only SDK access
-        env:
-          AGENTD_DEPLOY_KEY: ${{ secrets.AGENTD_DEPLOY_KEY }}
-        run: source scripts/setup-sdk-ssh.sh
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -141,7 +130,6 @@ jobs:
           platforms: linux/amd64
           tags: agents-${{ matrix.component }}:ci
           outputs: type=docker,dest=/tmp/agents-${{ matrix.component }}.tar
-          ssh: default=${{ env.SSH_AUTH_SOCK }}
           build-args: VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=agents-${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=agents-${{ matrix.component }}
@@ -164,13 +152,9 @@ jobs:
           tags: ghcr.io/bit-precise/agents-${{ matrix.component }}:${{ steps.version.outputs.version }}
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           outputs: ${{ startsWith(github.ref, 'refs/tags/v') && 'type=image' || format('type=oci,dest=/tmp/agents-{0}-multiarch.tar', matrix.component) }}
-          ssh: default=${{ env.SSH_AUTH_SOCK }}
           build-args: VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=agents-${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=agents-${{ matrix.component }}
-      - name: Stop SDK authentication agent
-        if: always()
-        run: if [ -n "${SSH_AGENT_PID:-}" ]; then ssh-agent -k >/dev/null; fi
 
   deployment:
     needs: [images]

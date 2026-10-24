@@ -14,12 +14,9 @@
 
 ## 构建与本机运行
 
-需要 Go 1.27.2 和 Node.js 24。服务端固定依赖 agentd SDK 的提交版本；仓库为私有时需有该仓库的只读 Git 权限。
+需要 Go 1.27.2 和 Node.js 24。服务端固定依赖 agentd SDK 的提交版本；agentd 是公开模块，经 Go 模块代理下载并按 go.sum 和校验和数据库校验，不需要额外的 Git 凭据。
 
 ```sh
-export GOPRIVATE=github.com/bit-precise/agentd
-# 使用你已有的 GitHub SSH 身份，不要把令牌写入 go.mod 或镜像。
-git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
 go mod download
 make build
 bin/agents init --config .run/agents.yaml
@@ -42,10 +39,10 @@ bin/agents serve --config .run/agents.yaml
 
 推送语义版本 tag（例如 `v0.1.0`）后，相同检查通过才发布三个 GHCR 多架构镜像、OCI Helm chart 和 GitHub Release 的 chart/镜像索引/SHA256SUMS。镜像标签与 Helm appVersion 使用同一个 tag。
 
-CI 的 `AGENTD_DEPLOY_KEY` 是仅有 agentd 读取权限的 deploy key；Docker 构建通过 BuildKit SSH 转发，密钥不进入镜像层。所有工作流动作固定到官方不可变提交。
+CI 和 Docker 构建都从 Go 模块代理获取 agentd，不使用任何仓库凭据。所有工作流动作固定到官方不可变提交。
 
 ```sh
-docker buildx build --ssh default --platform linux/amd64,linux/arm64 --target control -t agents-control:dev .
+docker buildx build --platform linux/amd64,linux/arm64 --target control -t agents-control:dev .
 # --target edge / --target console 分别生成其他组件
 ```
 
