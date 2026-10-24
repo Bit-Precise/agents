@@ -145,7 +145,7 @@ Agent 是设备身份，可以同时承担 ingress 和 egress 角色，也可以
 
 旧聚合 `/api/v1/state` 和旧管理动作路径已删除，不再返回 SPA HTML。Console 基于 shadcn/ui，页面地址即路由：`/workspaces/{workspaceId}/{overview|members|agents|ingresses|egresses|servers|routes|access}`，实例管理员页面在 `/admin/{workspaces|users|agents|ingresses|egresses|servers|audit}`，`agentd login` 的确认页在 `/device/{id}`。Console 按当前页面、工作空间和页码调用资源 API，表单候选独立搜索和分页；身份或 Workspace 改变会取消旧请求。管理资源支持 User Bearer 或 Cookie；浏览器 Cookie 写请求同时要求同源 Origin 和内存 CSRF Token。`/v1/sessions/current` 仅表示实际 Cookie 会话，Bearer 身份应读取 `/v1/users/me`。错误保持 `{error:{kind,message}}`：未认证 401、已认证但权限/CSRF 被拒 403、不可见资源 404、状态冲突 409、超大 JSON 413、媒体类型不支持 415、依赖不可用 503。
 
-设备控制协议使用 `POST /api/v1/enroll`（SA 注册密钥）、`POST /v1/agent-enrollments`（`agentd login`）、`GET /api/v1/agent/credentials`、`POST /api/v1/agent/config`。取消审批后请求体只包含身份与 desired spec，凭据文档为 v2，承载协议为 v3；agentd 需与服务端同时升级。`/agent` 是独立 XHTTP 入口；`/auth/oidc/login`、`/auth/oidc/callback`、`/auth/authorize`、Hydra 使用的 `/oauth/device`、`/oauth/login`、`/oauth/consent`、`/oauth/device/done`、`/oauth/error` 和服务域 `/__agents/callback` 是浏览器导航协议，内部 Control/Edge RPC 也不在本次迁移范围。
+设备控制协议使用 `POST /api/v1/enroll`（SA 注册密钥）、`POST /v1/agent-enrollments`（`agentd login`）、`GET /api/v1/agent/credentials`、`POST /api/v1/agent/config`。取消审批后请求体只包含身份与 desired spec，凭据文档为 v2，承载协议为 v3；agentd 需与服务端同时升级。`/agent` 是独立 XHTTP 入口，传输版本为 2：上行沿用 Xray-core packet-up 的合并写入与并发 POST。Edge 同时接受版本 1 的 agentd，因此先发布 Edge 再升级 agentd；版本 2 的 agentd 连接旧 Edge 会在 GET 阶段被拒绝。`/auth/oidc/login`、`/auth/oidc/callback`、`/auth/authorize`、Hydra 使用的 `/oauth/device`、`/oauth/login`、`/oauth/consent`、`/oauth/device/done`、`/oauth/error` 和服务域 `/__agents/callback` 是浏览器导航协议，内部 Control/Edge RPC 也不在本次迁移范围。
 
 ## 已验证与未实现
 

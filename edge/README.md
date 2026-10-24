@@ -65,6 +65,14 @@ grant to peer-stamped leases). Edge fails closed: an unreachable Control admits
 no new session or flow and a failed recheck closes the flow. XHTTP has a 2-minute *idle* timeout, not a fixed session TTL;
 yamux's 30-second keepalive maintains healthy otherwise-idle transports.
 
+The handler uses the agentd SDK's XHTTP defaults, which follow Xray-core
+packet-up: POSTs of up to 1,000,000 bytes, 30 buffered packets per session, and
+POSTs that wait for a slot instead of being rejected. Upload buffering per
+session is bounded by roughly (MaxPostsPerSession + 2 × MaxBufferedPosts) ×
+MaxEachPostBytes, about 90 MB at the defaults, so size the Edge memory limit to
+the expected number of busy sessions. Version 1 agentd clients remain accepted;
+deploy Edge before upgrading agentd.
+
 “Connected” means an authenticated session of an active Agent. It is not an active probe of each HTTP origin. Missing providers
 return unavailable; provider HTTP errors return 502/503. Control remains the only
 policy authority and the root application owns browser authentication/cookies.

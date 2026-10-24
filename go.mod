@@ -3,7 +3,7 @@ module github.com/bit-precise/agents
 go 1.27
 
 require (
-	github.com/bit-precise/agentd v0.0.0-20261018164128-c287700c633a
+	github.com/bit-precise/agentd v0.0.0-20261024080823-449a3364af7a
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/jackc/pgx/v5 v5.10.0
